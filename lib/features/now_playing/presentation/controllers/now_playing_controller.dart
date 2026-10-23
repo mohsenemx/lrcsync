@@ -9,8 +9,8 @@ import '../../data/services/lyrics_service.dart';
 import '../../data/services/native_media_service.dart';
 
 class NowPlayingController extends ChangeNotifier {
-  final NativeMediaService _mediaService;
-  final LyricsService _lyricsService;
+  final NativeMediaService mediaService;
+  final LyricsService lyricsService;
   StreamSubscription<TrackInfo?>? _subscription;
 
   TrackInfo? _currentTrack;
@@ -23,8 +23,8 @@ class NowPlayingController extends ChangeNotifier {
   String? _lyricsError;
   bool _isSavingLyrics = false;
 
-  NowPlayingController(this._mediaService, {LyricsService? lyricsService})
-    : _lyricsService = lyricsService ?? LyricsService();
+  NowPlayingController(this.mediaService, {LyricsService? lyricsService})
+    : lyricsService = lyricsService ?? LyricsService();
 
   TrackInfo? get currentTrack => _currentTrack;
   bool get hasNotificationAccess => _hasNotificationAccess;
@@ -47,25 +47,30 @@ class NowPlayingController extends ChangeNotifier {
   }
 
   Future<void> checkPermissions() async {
-    _hasNotificationAccess = await _mediaService.hasNotificationPermission();
-    _hasAudioPermission = await _mediaService.hasAudioPermission();
+    _hasNotificationAccess = await mediaService.hasNotificationPermission();
+    _hasAudioPermission = await mediaService.hasAudioPermission();
 
     if (_hasNotificationAccess) {
-      await _mediaService.refreshTrack();
+      await mediaService.refreshTrack();
     }
     notifyListeners();
   }
 
   Future<void> requestAudioPermission() async {
-    await _mediaService.requestAudioPermission();
+    await mediaService.requestAudioPermission();
     await checkPermissions();
   }
 
   Future<void> requestNotificationAccess() async {
-    await _mediaService.openNotificationSettings();
+    await mediaService.openNotificationSettings();
   }
 
-  Future<void> fetchLyrics(AppSettingsController settings) async {
+  Future<void> fetchLyrics(
+    AppSettingsController settings, {
+    String? customTitle,
+    String? customArtist,
+    String? customAlbum,
+  }) async {
     final track = _currentTrack;
     if (track == null || _isFetchingLyrics) return;
 
@@ -73,18 +78,24 @@ class NowPlayingController extends ChangeNotifier {
     _lyricsError = null;
     notifyListeners();
 
-    final result = await _lyricsService.fetchLyrics(
+    final result = await lyricsService.fetchLyrics(
       track: track,
       primaryProvider: settings.primaryProvider,
       useFallback: settings.useFallbackProvider,
       preferLocalFirst: settings.preferLocalLrcFirst,
+      customTitle: customTitle,
+      customArtist: customArtist,
+      customAlbum: customAlbum,
     );
 
     _isFetchingLyrics = false;
     if (result != null) {
       _lyricsResult = result;
     } else {
-      _lyricsError = 'No lyrics found for "${track.title}".';
+      final queriedTitle = customTitle?.isNotEmpty == true
+          ? customTitle!
+          : track.title;
+      _lyricsError = 'No lyrics found for "$queriedTitle".';
     }
     notifyListeners();
   }
@@ -99,7 +110,7 @@ class NowPlayingController extends ChangeNotifier {
     _isSavingLyrics = true;
     notifyListeners();
 
-    final result = await _mediaService.saveLrcFile(
+    final result = await mediaService.saveLrcFile(
       targetPath: track.expectedLrcPath,
       title: track.title,
       artist: track.artist,
@@ -113,7 +124,7 @@ class NowPlayingController extends ChangeNotifier {
 
   void _startListening() {
     _subscription?.cancel();
-    _subscription = _mediaService.trackStream.listen((track) {
+    _subscription = mediaService.trackStream.listen((track) {
       final trackChanged =
           _currentTrack?.title != track?.title ||
           _currentTrack?.artist != track?.artist;

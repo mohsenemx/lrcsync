@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import 'core/settings/app_settings_controller.dart';
 import 'core/widgets/floating_nav_bar.dart';
+import 'features/library/presentation/controllers/library_controller.dart';
+import 'features/library/presentation/screens/library_screen.dart';
 import 'features/now_playing/presentation/controllers/now_playing_controller.dart';
 import 'features/now_playing/presentation/screens/now_playing_screen.dart';
 import 'features/now_playing/presentation/widgets/permissions_modal.dart';
@@ -9,11 +11,13 @@ import 'features/settings/presentation/screens/settings_screen.dart';
 
 class MainShell extends StatefulWidget {
   final NowPlayingController nowPlayingController;
+  final LibraryController libraryController;
   final AppSettingsController settingsController;
 
   const MainShell({
     super.key,
     required this.nowPlayingController,
+    required this.libraryController,
     required this.settingsController,
   });
 
@@ -56,19 +60,27 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       widget.nowPlayingController.checkPermissions();
+      widget.libraryController.loadTracks();
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final safeIndex = _selectedIndex.clamp(0, 2);
+
     return Scaffold(
-      extendBody: true, // Lets content scroll behind the floating navbar
+      extendBody: true,
       body: IndexedStack(
-        index: _selectedIndex,
+        index: safeIndex,
         children: [
           NowPlayingScreen(
             controller: widget.nowPlayingController,
             settings: widget.settingsController,
+          ),
+          LibraryScreen(
+            controller: widget.libraryController,
+            settings: widget.settingsController,
+            lyricsService: widget.nowPlayingController.lyricsService,
           ),
           SettingsScreen(
             settings: widget.settingsController,
@@ -77,7 +89,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
         ],
       ),
       bottomNavigationBar: FloatingNavBar(
-        currentIndex: _selectedIndex,
+        currentIndex: safeIndex,
         onTap: (index) => setState(() => _selectedIndex = index),
       ),
     );

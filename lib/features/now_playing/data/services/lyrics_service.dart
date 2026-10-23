@@ -19,9 +19,15 @@ class LyricsService {
     required LyricsProvider primaryProvider,
     required bool useFallback,
     required bool preferLocalFirst,
+    String? customTitle,
+    String? customArtist,
+    String? customAlbum,
   }) async {
-    // 1. Check local .lrc file first if enabled
-    if (preferLocalFirst && track.expectedLrcPath != null) {
+    final isManualRetry =
+        customTitle != null || customArtist != null || customAlbum != null;
+
+    // 1. Check local .lrc file first (only on initial fetch, not manual retry)
+    if (!isManualRetry && preferLocalFirst && track.expectedLrcPath != null) {
       final localFile = File(track.expectedLrcPath!);
       if (await localFile.exists()) {
         final content = await localFile.readAsString();
@@ -35,8 +41,22 @@ class LyricsService {
       }
     }
 
+    final effectiveTitle = (customTitle ?? track.title).trim();
+    final effectiveArtist = (customArtist ?? track.artist).trim();
+    final effectiveAlbum = customAlbum != null
+        ? customAlbum.trim()
+        : (track.album == 'Unknown Album' ? '' : track.album.trim());
+
+    if (effectiveTitle.isEmpty) return null;
+
     // 2. Query Primary Provider
-    final primaryResult = await _fetchFromProvider(track, primaryProvider);
+    final primaryResult = await _fetchFromProvider(
+      title: effectiveTitle,
+      artist: effectiveArtist,
+      album: effectiveAlbum,
+      durationSeconds: isManualRetry ? 0 : track.duration.inSeconds,
+      provider: primaryProvider,
+    );
     if (primaryResult != null) return primaryResult;
 
     // 3. Query Fallback Provider if enabled
@@ -44,54 +64,79 @@ class LyricsService {
       final fallbackProvider = primaryProvider == LyricsProvider.lrclib
           ? LyricsProvider.lrcRed
           : LyricsProvider.lrclib;
-      return await _fetchFromProvider(track, fallbackProvider);
+      return await _fetchFromProvider(
+        title: effectiveTitle,
+        artist: effectiveArtist,
+        album: effectiveAlbum,
+        durationSeconds: isManualRetry ? 0 : track.duration.inSeconds,
+        provider: fallbackProvider,
+      );
     }
 
     return null;
   }
 
-  Future<LyricsResult?> _fetchFromProvider(
-    TrackInfo track,
-    LyricsProvider provider,
-  ) async {
+  Future<LyricsResult?> _fetchFromProvider({
+    required String title,
+    required String artist,
+    required String album,
+    required int durationSeconds,
+    required LyricsProvider provider,
+  }) async {
     switch (provider) {
       case LyricsProvider.lrclib:
-        return _fetchFromLrcLib(track);
+        return _fetchFromLrcLib(
+          title: title,
+          artist: artist,
+          album: album,
+          durationSeconds: durationSeconds,
+        );
       case LyricsProvider.lrcRed:
-        return _fetchFromLrcRed(track);
+        return _fetchFromLrcRed(
+          title: title,
+          artist: artist,
+          album: album,
+          durationSeconds: durationSeconds,
+        );
     }
   }
 
-  /// --- LRCLIB IMPLEMENTATION ---
-  Future<LyricsResult?> _fetchFromLrcLib(TrackInfo track) async {
+  Future<LyricsResult?> _fetchFromLrcLib({
+    required String title,
+    required String artist,
+    required String album,
+    required int durationSeconds,
+  }) async {
     try {
-      // Attempt 1: Exact match via /api/get
-      final queryParams = <String, String>{
-        'track_name': track.title,
-        'artist_name': track.artist,
-        if (track.album != 'Unknown Album') 'album_name': track.album,
-        if (track.duration.inSeconds > 0)
-          'duration': track.duration.inSeconds.toString(),
-      };
+      // Attempt 1: /api/get when album and duration are both known
+      if (album.isNotEmpty && durationSeconds > 0) {
+        final getUri = Uri.https('lrclib.net', '/api/get', {
+          'track_name': title,
+          'artist_name': artist,
+          'album_name': album,
+          'duration': durationSeconds.toString(),
+        });
+        final getRes = await http
+            .get(getUri, headers: _headers)
+            .timeout(const Duration(seconds: 10));
 
-      final getUri = Uri.https('lrclib.net', '/api/get', queryParams);
-      final getRes = await http
-          .get(getUri, headers: _headers)
-          .timeout(const Duration(seconds: 10));
-
-      if (getRes.statusCode == 200) {
-        final data =
-            jsonDecode(utf8.decode(getRes.bodyBytes)) as Map<String, dynamic>;
-        final parsed = _extractLrcLibRecord(data);
-        if (parsed != null) return parsed;
+        if (getRes.statusCode == 200) {
+          final data =
+              jsonDecode(utf8.decode(getRes.bodyBytes)) as Map<String, dynamic>;
+          final parsed = _extractLrcLibRecord(data);
+          if (parsed != null) return parsed;
+        }
       }
 
-      // Attempt 2: Fallback to /api/search if duration/album tag slightly differed
-      final searchUri = Uri.https('lrclib.net', '/api/search', {
-        'track_name': track.title,
-        'artist_name': track.artist,
-      });
+      // Attempt 2: /api/search (works with or without album)
+      final searchParams = <String, String>{
+        'track_name': title,
+        if (artist.isNotEmpty && artist != 'Unknown Artist')
+          'artist_name': artist,
+        if (album.isNotEmpty) 'album_name': album,
+      };
 
+      final searchUri = Uri.https('lrclib.net', '/api/search', searchParams);
       final searchRes = await http
           .get(searchUri, headers: _headers)
           .timeout(const Duration(seconds: 10));
@@ -99,7 +144,6 @@ class LyricsService {
       if (searchRes.statusCode == 200) {
         final list =
             jsonDecode(utf8.decode(searchRes.bodyBytes)) as List<dynamic>;
-        // Prefer synced lyrics first
         for (final item in list) {
           if (item is Map<String, dynamic>) {
             final synced = (item['syncedLyrics'] as String?)?.trim();
@@ -112,7 +156,6 @@ class LyricsService {
             }
           }
         }
-        // Fallback to plain lyrics
         for (final item in list) {
           if (item is Map<String, dynamic>) {
             final parsed = _extractLrcLibRecord(item);
@@ -120,9 +163,7 @@ class LyricsService {
           }
         }
       }
-    } catch (_) {
-      // Network or parsing error; allow fallback to continue
-    }
+    } catch (_) {}
     return null;
   }
 
@@ -146,13 +187,21 @@ class LyricsService {
     return null;
   }
 
-  /// --- LRC.RED IMPLEMENTATION ---
-  Future<LyricsResult?> _fetchFromLrcRed(TrackInfo track) async {
+  Future<LyricsResult?> _fetchFromLrcRed({
+    required String title,
+    required String artist,
+    required String album,
+    required int durationSeconds,
+  }) async {
     try {
-      // Step 1: Search for track ISRC via /search.json
-      final query = '${track.title} ${track.artist}'.trim();
-      final searchUri = Uri.https('lrc.red', '/search.json', {'q': query});
+      final cleanArtist = artist == 'Unknown Artist' ? '' : artist;
+      final query = [
+        title,
+        cleanArtist,
+        album,
+      ].where((s) => s.isNotEmpty).join(' ').trim();
 
+      final searchUri = Uri.https('lrc.red', '/search.json', {'q': query});
       final searchRes = await http
           .get(searchUri, headers: _headers)
           .timeout(const Duration(seconds: 10));
@@ -164,22 +213,21 @@ class LyricsService {
       final hits = (body['hits'] as List<dynamic>?) ?? [];
       if (hits.isEmpty) return null;
 
-      // Rank candidates by closeness to track duration (if known)
       final candidates = hits.whereType<Map<String, dynamic>>().where((h) {
         final isrc = h['isrc'] as String?;
         return isrc != null && isrc.isNotEmpty;
       }).toList();
 
-      if (track.duration.inSeconds > 0) {
-        final targetSec = track.duration.inSeconds;
+      if (durationSeconds > 0) {
         candidates.sort((a, b) {
           final durA = (a['duration'] as num?)?.toDouble() ?? 0;
           final durB = (b['duration'] as num?)?.toDouble() ?? 0;
-          return (durA - targetSec).abs().compareTo((durB - targetSec).abs());
+          return (durA - durationSeconds).abs().compareTo(
+            (durB - durationSeconds).abs(),
+          );
         });
       }
 
-      // Step 2: Try fetching /s/{isrc}.lrc for the top matching candidates
       for (final candidate in candidates.take(3)) {
         final isrc = candidate['isrc'] as String;
         final lrcUri = Uri.https('lrc.red', '/s/$isrc.lrc');
@@ -198,9 +246,7 @@ class LyricsService {
           }
         }
       }
-    } catch (_) {
-      // Network or parsing error
-    }
+    } catch (_) {}
     return null;
   }
 

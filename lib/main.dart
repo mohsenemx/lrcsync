@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import 'core/settings/app_settings_controller.dart';
 import 'core/theme/app_theme.dart';
+import 'features/library/presentation/controllers/library_controller.dart';
 import 'features/now_playing/data/services/native_media_service.dart';
 import 'features/now_playing/presentation/controllers/now_playing_controller.dart';
 import 'main_shell.dart';
@@ -11,11 +12,13 @@ void main() {
   WidgetsFlutterBinding.ensureInitialized();
   final mediaService = NativeMediaService();
   final nowPlayingController = NowPlayingController(mediaService);
+  final libraryController = LibraryController(mediaService);
   final settingsController = AppSettingsController();
 
   runApp(
     LRCSyncApp(
       nowPlayingController: nowPlayingController,
+      libraryController: libraryController,
       settingsController: settingsController,
     ),
   );
@@ -23,11 +26,13 @@ void main() {
 
 class LRCSyncApp extends StatelessWidget {
   final NowPlayingController nowPlayingController;
+  final LibraryController libraryController;
   final AppSettingsController settingsController;
 
   const LRCSyncApp({
     super.key,
     required this.nowPlayingController,
+    required this.libraryController,
     required this.settingsController,
   });
 
@@ -54,6 +59,7 @@ class LRCSyncApp extends StatelessWidget {
               ),
               home: MainShell(
                 nowPlayingController: nowPlayingController,
+                libraryController: libraryController,
                 settingsController: settingsController,
               ),
             );

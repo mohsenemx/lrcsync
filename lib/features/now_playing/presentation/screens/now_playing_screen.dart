@@ -85,12 +85,18 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
               if (widget.controller.currentTrack != null)
                 TrackCard(
                   track: widget.controller.currentTrack!,
+                  mediaService: widget.controller.mediaService,
                   lyricsResult: widget.controller.lyricsResult,
                   isFetchingLyrics: widget.controller.isFetchingLyrics,
                   isSavingLyrics: widget.controller.isSavingLyrics,
                   lyricsError: widget.controller.lyricsError,
-                  onFetchLyrics: () =>
-                      widget.controller.fetchLyrics(widget.settings),
+                  onFetchLyrics: ({title, artist, album}) =>
+                      widget.controller.fetchLyrics(
+                        widget.settings,
+                        customTitle: title,
+                        customArtist: artist,
+                        customAlbum: album,
+                      ),
                   onSaveLyrics: _handleSaveLyrics,
                 )
               else

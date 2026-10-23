@@ -14,6 +14,9 @@ class NativeMediaService {
   static const _methodChannel = MethodChannel('lrcsync/media_methods');
   static const _eventChannel = EventChannel('lrcsync/media_events');
 
+  // In-memory cover art cache keyed by albumId or filePath
+  final Map<String, Uint8List?> _artCache = {};
+
   Stream<TrackInfo?> get trackStream {
     return _eventChannel.receiveBroadcastStream().map((event) {
       if (event == null || event is! Map) return null;
@@ -45,6 +48,35 @@ class NativeMediaService {
 
   Future<void> refreshTrack() async {
     await _methodChannel.invokeMethod('refreshTrack');
+  }
+
+  Future<List<TrackInfo>> getDeviceTracks() async {
+    final list = await _methodChannel.invokeMethod<List<dynamic>>(
+      'getDeviceTracks',
+    );
+    if (list == null) return [];
+    return list
+        .whereType<Map<dynamic, dynamic>>()
+        .map(TrackInfo.fromMap)
+        .toList();
+  }
+
+  Future<Uint8List?> getAlbumArt({int? albumId, String? filePath}) async {
+    final cacheKey = '${albumId ?? 0}_${filePath ?? ''}';
+    if (_artCache.containsKey(cacheKey)) {
+      return _artCache[cacheKey];
+    }
+
+    final bytes = await _methodChannel.invokeMethod<Uint8List>('getAlbumArt', {
+      'albumId': albumId,
+      'filePath': filePath,
+    });
+
+    if (_artCache.length > 250) {
+      _artCache.remove(_artCache.keys.first);
+    }
+    _artCache[cacheKey] = bytes;
+    return bytes;
   }
 
   Future<SaveLrcResult> saveLrcFile({

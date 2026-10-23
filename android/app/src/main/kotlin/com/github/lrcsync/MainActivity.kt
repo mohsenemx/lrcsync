@@ -2,10 +2,13 @@ package com.github.lrcsync
 
 import android.Manifest
 import android.content.ComponentName
+import android.content.ContentUris
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
 import android.media.MediaMetadata
+import android.media.MediaMetadataRetriever
 import android.media.session.MediaController
 import android.media.session.MediaSessionManager
 import android.net.Uri
@@ -13,18 +16,23 @@ import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import android.provider.Settings
+import android.util.Size
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
+import java.io.ByteArrayOutputStream
 import java.io.File
+import java.util.concurrent.Executors
 
 class MainActivity : FlutterActivity() {
     private val METHOD_CHANNEL = "lrcsync/media_methods"
     private val EVENT_CHANNEL = "lrcsync/media_events"
     private val AUDIO_PERM_CODE = 1001
+
+    private val ioExecutor = Executors.newFixedThreadPool(4)
 
     private var mediaSessionManager: MediaSessionManager? = null
     private var activeController: MediaController? = null
@@ -81,6 +89,22 @@ class MainActivity : FlutterActivity() {
                     result.success(null)
                 }
 
+                "getDeviceTracks" -> {
+                    ioExecutor.execute {
+                        val tracks = queryAllDeviceTracks()
+                        runOnUiThread { result.success(tracks) }
+                    }
+                }
+
+                "getAlbumArt" -> {
+                    val albumId = (call.argument<Number>("albumId"))?.toLong()
+                    val filePath = call.argument<String>("filePath")
+                    ioExecutor.execute {
+                        val bytes = loadAlbumArtBytes(albumId, filePath)
+                        runOnUiThread { result.success(bytes) }
+                    }
+                }
+
                 "saveLrcFile" -> {
                     val targetPath = call.argument<String>("targetPath")
                     val title = call.argument<String>("title") ?: ""
@@ -108,6 +132,128 @@ class MainActivity : FlutterActivity() {
         )
     }
 
+    private fun queryAllDeviceTracks(): List<Map<String, Any?>> {
+        if (!hasReadAudioPermission()) return emptyList()
+        val list = mutableListOf<Map<String, Any?>>()
+
+        val projection = arrayOf(
+            MediaStore.Audio.Media._ID,
+            MediaStore.Audio.Media.TITLE,
+            MediaStore.Audio.Media.ARTIST,
+            MediaStore.Audio.Media.ALBUM,
+            MediaStore.Audio.Media.ALBUM_ID,
+            MediaStore.Audio.Media.DURATION,
+            MediaStore.Audio.Media.DATA
+        )
+        val selection = "${MediaStore.Audio.Media.IS_MUSIC} != 0"
+        val sortOrder = "${MediaStore.Audio.Media.TITLE} COLLATE NOCASE ASC"
+
+        try {
+            contentResolver.query(
+                MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                projection,
+                selection,
+                null,
+                sortOrder
+            )?.use { cursor ->
+                val titleCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
+                val artistCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
+                val albumCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
+                val albumIdCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID)
+                val durationCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
+                val dataCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATA)
+
+                while (cursor.moveToNext()) {
+                    val filePath = cursor.getString(dataCol) ?: continue
+                    val title = cursor.getString(titleCol) ?: ""
+                    val artist = cursor.getString(artistCol) ?: ""
+                    val album = cursor.getString(albumCol) ?: ""
+                    val albumId = cursor.getLong(albumIdCol)
+                    val duration = cursor.getLong(durationCol)
+
+                    val dotIndex = filePath.lastIndexOf('.')
+                    val lrcPath = if (dotIndex != -1) {
+                        "${filePath.substring(0, dotIndex)}.lrc"
+                    } else {
+                        "$filePath.lrc"
+                    }
+                    val hasLocalLrc = File(lrcPath).exists()
+
+                    list.add(
+                        mapOf(
+                            "title" to title,
+                            "artist" to artist,
+                            "album" to album,
+                            "albumId" to albumId,
+                            "durationMs" to duration,
+                            "filePath" to filePath,
+                            "hasLocalLrc" to hasLocalLrc
+                        )
+                    )
+                }
+            }
+        } catch (_: Exception) {
+        }
+
+        return list
+    }
+
+    private fun loadAlbumArtBytes(albumId: Long?, filePath: String?): ByteArray? {
+        if (albumId != null && albumId > 0) {
+            try {
+                val uri = ContentUris.withAppendedId(
+                    Uri.parse("content://media/external/audio/albumart"),
+                    albumId
+                )
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    val bitmap = contentResolver.loadThumbnail(uri, Size(256, 256), null)
+                    return bitmapToBytes(bitmap)
+                }
+            } catch (_: Exception) {
+            }
+        }
+
+        if (!filePath.isNullOrBlank()) {
+            val retriever = MediaMetadataRetriever()
+            try {
+                retriever.setDataSource(filePath)
+                val embedded = retriever.embeddedPicture
+                if (embedded != null) return embedded
+            } catch (_: Exception) {
+            } finally {
+                try {
+                    retriever.release()
+                } catch (_: Exception) {
+                }
+            }
+        }
+        return null
+    }
+
+    private fun extractMetadataBitmapBytes(metadata: MediaMetadata): ByteArray? {
+        val bitmap = metadata.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART)
+            ?: metadata.getBitmap(MediaMetadata.METADATA_KEY_ART)
+            ?: metadata.getBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON)
+            ?: return null
+        return bitmapToBytes(bitmap)
+    }
+
+    private fun bitmapToBytes(bitmap: Bitmap): ByteArray {
+        val maxSide = 256
+        val ratio = minOf(
+            maxSide.toFloat() / bitmap.width,
+            maxSide.toFloat() / bitmap.height,
+            1.0f
+        )
+        val width = (bitmap.width * ratio).toInt().coerceAtLeast(1)
+        val height = (bitmap.height * ratio).toInt().coerceAtLeast(1)
+        val scaled = Bitmap.createScaledBitmap(bitmap, width, height, true)
+
+        val stream = ByteArrayOutputStream()
+        scaled.compress(Bitmap.CompressFormat.JPEG, 85, stream)
+        return stream.toByteArray()
+    }
+
     private fun handleSaveLrcFile(
         targetPath: String?,
         title: String,
@@ -126,10 +272,10 @@ class MainActivity : FlutterActivity() {
             return
         }
 
-        // Resolve target .lrc path if it wasn't populated when track first loaded
-        var resolvedLrcPath = targetPath
+        var resolvedLrcPath: String? = targetPath
         if (resolvedLrcPath.isNullOrBlank()) {
-            val audioPath = resolveLocalFilePath(title, artist)
+            val match: Pair<String, Long>? = resolveLocalTrackMatch(title, artist)
+            val audioPath: String? = match?.first
             if (!audioPath.isNullOrBlank()) {
                 val dotIndex = audioPath.lastIndexOf('.')
                 resolvedLrcPath = if (dotIndex != -1) {
@@ -264,25 +410,37 @@ class MainActivity : FlutterActivity() {
         val album = metadata.getString(MediaMetadata.METADATA_KEY_ALBUM) ?: ""
         val duration = metadata.getLong(MediaMetadata.METADATA_KEY_DURATION)
 
-        val filePath = if (hasReadAudioPermission()) resolveLocalFilePath(title, artist) else null
+        val localMatch: Pair<String, Long>? = if (hasReadAudioPermission()) {
+            resolveLocalTrackMatch(title, artist)
+        } else {
+            null
+        }
+        val filePath = localMatch?.first
+        val albumId = localMatch?.second
+        val artBytes = extractMetadataBitmapBytes(metadata) ?: loadAlbumArtBytes(albumId, filePath)
 
         val data = mapOf(
             "title" to title,
             "artist" to artist,
             "album" to album,
+            "albumId" to albumId,
             "durationMs" to duration,
             "filePath" to filePath,
-            "playerPackage" to playerPackage
+            "playerPackage" to playerPackage,
+            "artBytes" to artBytes
         )
         eventSink?.success(data)
     }
 
-    private fun resolveLocalFilePath(title: String, artist: String): String? {
+    private fun resolveLocalTrackMatch(title: String, artist: String): Pair<String, Long>? {
         if (title.isBlank()) return null
         try {
-            val projection = arrayOf(MediaStore.Audio.Media.DATA)
+            val projection = arrayOf(
+                MediaStore.Audio.Media.DATA,
+                MediaStore.Audio.Media.ALBUM_ID
+            )
 
-            // 1. Case-insensitive Title + Artist match
+            // 1. Exact Title + Artist match (case-insensitive)
             contentResolver.query(
                 MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
                 projection,
@@ -291,12 +449,13 @@ class MainActivity : FlutterActivity() {
                 null
             )?.use { cursor ->
                 if (cursor.moveToFirst()) {
-                    val dataIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATA)
-                    return cursor.getString(dataIndex)
+                    val path = cursor.getString(cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATA))
+                    val albumId = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID))
+                    return Pair(path, albumId)
                 }
             }
 
-            // 2. Case-insensitive Title match
+            // 2. Title match (case-insensitive)
             contentResolver.query(
                 MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
                 projection,
@@ -305,8 +464,9 @@ class MainActivity : FlutterActivity() {
                 null
             )?.use { cursor ->
                 if (cursor.moveToFirst()) {
-                    val dataIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATA)
-                    return cursor.getString(dataIndex)
+                    val path = cursor.getString(cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATA))
+                    val albumId = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID))
+                    return Pair(path, albumId)
                 }
             }
 
@@ -319,8 +479,9 @@ class MainActivity : FlutterActivity() {
                 null
             )?.use { cursor ->
                 if (cursor.moveToFirst()) {
-                    val dataIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATA)
-                    return cursor.getString(dataIndex)
+                    val path = cursor.getString(cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATA))
+                    val albumId = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID))
+                    return Pair(path, albumId)
                 }
             }
         } catch (_: Exception) {

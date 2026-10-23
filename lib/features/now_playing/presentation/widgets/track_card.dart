@@ -1,20 +1,26 @@
 import 'package:flutter/material.dart';
 
+import '../../../../core/widgets/album_art_view.dart';
 import '../../data/models/lyrics_result.dart';
 import '../../data/models/track_info.dart';
+import '../../data/services/native_media_service.dart';
+import 'lyrics_workspace.dart';
 
 class TrackCard extends StatelessWidget {
   final TrackInfo track;
+  final NativeMediaService mediaService;
   final LyricsResult? lyricsResult;
   final bool isFetchingLyrics;
   final bool isSavingLyrics;
   final String? lyricsError;
-  final VoidCallback onFetchLyrics;
+  final void Function({String? title, String? artist, String? album})
+  onFetchLyrics;
   final VoidCallback onSaveLyrics;
 
   const TrackCard({
     super.key,
     required this.track,
+    required this.mediaService,
     required this.lyricsResult,
     required this.isFetchingLyrics,
     required this.isSavingLyrics,
@@ -30,7 +36,7 @@ class TrackCard extends StatelessWidget {
 
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(24.0),
+        padding: const EdgeInsets.all(20.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
@@ -76,143 +82,67 @@ class TrackCard extends StatelessWidget {
                 ),
               ],
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 16),
 
-            // Title
-            Text(
-              track.title,
-              style: textTheme.headlineSmall?.copyWith(
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 6),
-
-            // Artist & Album
-            Text(
-              '${track.artist} • ${track.album}',
-              style: textTheme.bodyLarge?.copyWith(
-                color: scheme.onSurfaceVariant,
-              ),
-            ),
-            const SizedBox(height: 24),
-
-            // Fetch Lyrics Button
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton.icon(
-                onPressed: isFetchingLyrics ? null : onFetchLyrics,
-                icon: isFetchingLyrics
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2.5),
-                      )
-                    : Icon(
-                        lyricsResult == null
-                            ? Icons.lyrics_rounded
-                            : Icons.refresh_rounded,
-                      ),
-                label: Text(
-                  isFetchingLyrics
-                      ? 'Fetching Lyrics...'
-                      : (lyricsResult == null
-                            ? 'Fetch Lyrics'
-                            : 'Re-fetch Lyrics'),
+            // Compact Cover Art + Track Metadata Row
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                AlbumArtView(
+                  track: track,
+                  mediaService: mediaService,
+                  size: 76,
+                  borderRadius: 18,
                 ),
-              ),
-            ),
-
-            // Error Message
-            if (lyricsError != null) ...[
-              const SizedBox(height: 16),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: scheme.errorContainer,
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Text(
-                  lyricsError!,
-                  style: textTheme.bodyMedium?.copyWith(
-                    color: scheme.onErrorContainer,
-                  ),
-                ),
-              ),
-            ],
-
-            // Fetched Lyrics Display + Save Button
-            if (lyricsResult != null) ...[
-              const SizedBox(height: 20),
-              const Divider(),
-              const SizedBox(height: 12),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Row(
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Icon(
-                        lyricsResult!.isSynced
-                            ? Icons.timer_outlined
-                            : Icons.subject_rounded,
-                        size: 18,
-                        color: scheme.primary,
-                      ),
-                      const SizedBox(width: 6),
                       Text(
-                        lyricsResult!.isSynced ? 'Synced LRC' : 'Plain Lyrics',
-                        style: textTheme.labelLarge?.copyWith(
-                          color: scheme.primary,
+                        track.title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: textTheme.titleLarge?.copyWith(
                           fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        track.artist,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: textTheme.bodyMedium?.copyWith(
+                          color: scheme.primary,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        track.album,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: textTheme.bodySmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
                         ),
                       ),
                     ],
                   ),
-                  Text(
-                    'via ${lyricsResult!.sourceName}',
-                    style: textTheme.labelMedium?.copyWith(
-                      color: scheme.onSurfaceVariant,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              Container(
-                width: double.infinity,
-                constraints: const BoxConstraints(maxHeight: 300),
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: scheme.surface,
-                  borderRadius: BorderRadius.circular(16),
                 ),
-                child: SingleChildScrollView(
-                  child: SelectableText(
-                    lyricsResult!.content,
-                    style: textTheme.bodyMedium?.copyWith(
-                      fontFamily: 'monospace',
-                      height: 1.5,
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton.tonalIcon(
-                  onPressed: isSavingLyrics ? null : onSaveLyrics,
-                  icon: isSavingLyrics
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2.5),
-                        )
-                      : const Icon(Icons.save_alt_rounded),
-                  label: Text(
-                    isSavingLyrics ? 'Saving...' : 'Save .lrc to Storage',
-                  ),
-                ),
-              ),
-            ],
+              ],
+            ),
+            const SizedBox(height: 20),
+
+            // Lyrics Fetch / Retry / Preview / Save Workspace
+            LyricsWorkspace(
+              track: track,
+              lyricsResult: lyricsResult,
+              isFetchingLyrics: isFetchingLyrics,
+              isSavingLyrics: isSavingLyrics,
+              lyricsError: lyricsError,
+              onFetchLyrics: onFetchLyrics,
+              onSaveLyrics: onSaveLyrics,
+            ),
           ],
         ),
       ),
