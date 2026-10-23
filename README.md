@@ -89,7 +89,7 @@ Required on Android 11+ to silently write non-media .lrc files directly into sha
 1. Clone the repository
 
 ```Bash
-git clone [https://github.com/your-username/lrcsync.git](https://github.com/your-username/lrcsync.git)
+git clone https://github.com/mohsenemx/lrcsync.git
 cd lrcsync
 ```
 2. Install dependencies
@@ -103,7 +103,25 @@ flutter pub get
 ```Bash
 flutter run
 ```
-4. Build release APK
+4. Configure Android release signing
+To build a signed release APK, you need an Android keystore and a key.properties file.
+
+Follow the official [Flutter guide to creating a keystore and configuring Android app signing](https://docs.flutter.dev/deployment/android#sign-the-app).
+
+Create `android/key.properties` with your signing information:
+```properties
+storePassword=YOUR_KEYSTORE_PASSWORD
+keyPassword=YOUR_KEY_PASSWORD
+keyAlias=lrcsync
+storeFile=/absolute/path/to/lrcsync-release.jks
+```
+
+Replace the placeholder values with your own credentials and the path to your keystore. The keyAlias must match the alias you used when creating the keystore.
+
+**Important**: Keep your keystore and `android/key.properties` private. Never commit them to version control. 
+This repository's .gitignore excludes both.
+
+5. Build release APK
 
 ```Bash
 flutter build apk --release
