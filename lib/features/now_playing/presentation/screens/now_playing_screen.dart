@@ -1,47 +1,63 @@
 import 'package:flutter/material.dart';
 
+import '../../../../core/settings/app_settings_controller.dart';
 import '../controllers/now_playing_controller.dart';
+import '../widgets/permissions_modal.dart';
 import '../widgets/track_card.dart';
 
 class NowPlayingScreen extends StatefulWidget {
   final NowPlayingController controller;
+  final AppSettingsController settings;
 
-  const NowPlayingScreen({super.key, required this.controller});
+  const NowPlayingScreen({
+    super.key,
+    required this.controller,
+    required this.settings,
+  });
 
   @override
   State<NowPlayingScreen> createState() => _NowPlayingScreenState();
 }
 
-class _NowPlayingScreenState extends State<NowPlayingScreen>
-    with WidgetsBindingObserver {
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addObserver(this);
-    widget.controller.initialize();
-  }
+class _NowPlayingScreenState extends State<NowPlayingScreen> {
+  Future<void> _handleSaveLyrics() async {
+    final result = await widget.controller.saveLyricsToStorage();
+    if (!mounted) return;
 
-  @override
-  void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-    super.dispose();
-  }
-
-  // Re-check permissions automatically when user returns from Android Settings
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
-      widget.controller.checkPermissions();
-    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        behavior: SnackBarBehavior.floating,
+        content: Text(
+          result.success
+              ? 'Saved automatically to ${result.path}'
+              : (result.error ?? 'Failed to save .lrc file.'),
+        ),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('LRCSync'),
-        centerTitle: false,
         actions: [
+          if (!widget.controller.hasAllPermissions)
+            IconButton(
+              icon: Badge(
+                child: Icon(Icons.shield_outlined, color: scheme.error),
+              ),
+              tooltip: 'Permissions Setup',
+              onPressed: () => showModalBottomSheet(
+                context: context,
+                isScrollControlled: true,
+                useSafeArea: true,
+                showDragHandle: true,
+                builder: (_) => PermissionsModal(controller: widget.controller),
+              ),
+            ),
           IconButton(
             icon: const Icon(Icons.refresh_rounded),
             tooltip: 'Refresh Playing Track',
@@ -50,97 +66,38 @@ class _NowPlayingScreenState extends State<NowPlayingScreen>
         ],
       ),
       body: ListenableBuilder(
-        listenable: widget.controller,
+        listenable: Listenable.merge([widget.controller, widget.settings]),
         builder: (context, _) {
           return ListView(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 120),
             children: [
-              if (!widget.controller.hasNotificationAccess)
-                _PermissionBanner(
-                  icon: Icons.notifications_active_outlined,
-                  title: 'Notification Access Required',
-                  subtitle: 'LRCSync needs access to media notifications to detect the currently playing song.',
-                  buttonText: 'Grant Access',
-                  onPressed: widget.controller.requestNotificationAccess,
+              Align(
+                alignment: Alignment.centerLeft,
+                child: ActionChip(
+                  avatar: const Icon(Icons.cloud_outlined, size: 16),
+                  label: Text(
+                    'Source: ${widget.settings.primaryProvider.name}',
+                  ),
+                  onPressed: null,
                 ),
-              if (!widget.controller.hasAudioPermission)
-                _PermissionBanner(
-                  icon: Icons.folder_open_rounded,
-                  title: 'Audio Storage Permission',
-                  subtitle: 'Needed to resolve the local file path of the currently playing song.',
-                  buttonText: 'Allow Audio Access',
-                  onPressed: widget.controller.requestAudioPermission,
-                ),
-              const SizedBox(height: 8),
+              ),
+              const SizedBox(height: 12),
               if (widget.controller.currentTrack != null)
-                TrackCard(track: widget.controller.currentTrack!)
+                TrackCard(
+                  track: widget.controller.currentTrack!,
+                  lyricsResult: widget.controller.lyricsResult,
+                  isFetchingLyrics: widget.controller.isFetchingLyrics,
+                  isSavingLyrics: widget.controller.isSavingLyrics,
+                  lyricsError: widget.controller.lyricsError,
+                  onFetchLyrics: () =>
+                      widget.controller.fetchLyrics(widget.settings),
+                  onSaveLyrics: _handleSaveLyrics,
+                )
               else
                 const _EmptyMediaState(),
             ],
           );
         },
-      ),
-    );
-  }
-}
-
-class _PermissionBanner extends StatelessWidget {
-  final IconData icon;
-  final String title;
-  final String subtitle;
-  final String buttonText;
-  final VoidCallback onPressed;
-
-  const _PermissionBanner({
-    required this.icon,
-    required this.title,
-    required this.subtitle,
-    required this.buttonText,
-    required this.onPressed,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Card(
-      color: scheme.secondaryContainer,
-      margin: const EdgeInsets.only(bottom: 12),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(icon, color: scheme.onSecondaryContainer),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    title,
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      color: scheme.onSecondaryContainer,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Text(
-              subtitle,
-              style: Theme.of(context).textTheme.bodyMedium
-                  ?.copyWith(color: scheme.onSecondaryContainer),
-            ),
-            const SizedBox(height: 12),
-            Align(
-              alignment: Alignment.centerRight,
-              child: FilledButton.tonal(
-                onPressed: onPressed,
-                child: Text(buttonText),
-              ),
-            ),
-          ],
-        ),
       ),
     );
   }
@@ -153,7 +110,7 @@ class _EmptyMediaState extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 64),
+      padding: const EdgeInsets.symmetric(vertical: 72),
       child: Column(
         children: [
           Icon(Icons.music_off_rounded, size: 64, color: scheme.outline),

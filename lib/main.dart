@@ -1,35 +1,63 @@
 import 'package:dynamic_color/dynamic_color.dart';
 import 'package:flutter/material.dart';
 
+import 'core/settings/app_settings_controller.dart';
 import 'core/theme/app_theme.dart';
 import 'features/now_playing/data/services/native_media_service.dart';
 import 'features/now_playing/presentation/controllers/now_playing_controller.dart';
-import 'features/now_playing/presentation/screens/now_playing_screen.dart';
+import 'main_shell.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   final mediaService = NativeMediaService();
-  final controller = NowPlayingController(mediaService);
+  final nowPlayingController = NowPlayingController(mediaService);
+  final settingsController = AppSettingsController();
 
-  runApp(LRCSyncApp(controller: controller));
+  runApp(
+    LRCSyncApp(
+      nowPlayingController: nowPlayingController,
+      settingsController: settingsController,
+    ),
+  );
 }
 
 class LRCSyncApp extends StatelessWidget {
-  final NowPlayingController controller;
+  final NowPlayingController nowPlayingController;
+  final AppSettingsController settingsController;
 
-  const LRCSyncApp({super.key, required this.controller});
+  const LRCSyncApp({
+    super.key,
+    required this.nowPlayingController,
+    required this.settingsController,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return DynamicColorBuilder(
-      builder: (ColorScheme? lightDynamic, ColorScheme? darkDynamic) {
-        return MaterialApp(
-          title: 'LRCSync',
-          debugShowCheckedModeBanner: false,
-          theme: AppTheme.buildTheme(lightDynamic, Brightness.light),
-          darkTheme: AppTheme.buildTheme(darkDynamic, Brightness.dark),
-          themeMode: ThemeMode.system,
-          home: NowPlayingScreen(controller: controller),
+    return ListenableBuilder(
+      listenable: settingsController,
+      builder: (context, _) {
+        return DynamicColorBuilder(
+          builder: (ColorScheme? lightDynamic, ColorScheme? darkDynamic) {
+            return MaterialApp(
+              title: 'LRCSync',
+              debugShowCheckedModeBanner: false,
+              themeMode: settingsController.themeMode,
+              theme: AppTheme.buildTheme(
+                dynamicScheme: lightDynamic,
+                brightness: Brightness.light,
+                settings: settingsController,
+              ),
+              darkTheme: AppTheme.buildTheme(
+                dynamicScheme: darkDynamic,
+                brightness: Brightness.dark,
+                settings: settingsController,
+              ),
+              home: MainShell(
+                nowPlayingController: nowPlayingController,
+                settingsController: settingsController,
+              ),
+            );
+          },
         );
       },
     );
