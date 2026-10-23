@@ -1,0 +1,122 @@
+name: Build LRCSync
+
+on:
+  push:
+    branches:
+      - main
+      - master
+
+  pull_request:
+    branches:
+      - main
+      - master
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Analyze and build Android APKs
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: "3.24.0"
+          cache: true
+
+      # Only trusted branch pushes and manual runs get the release key.
+      - name: Restore Android signing key
+        if: github.event_name != 'pull_request'
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -z "$KEYSTORE_BASE64" ||
+                -z "$KEYSTORE_PASSWORD" ||
+                -z "$KEY_PASSWORD" ||
+                -z "$KEY_ALIAS" ]]; then
+            echo "Android signing secrets are missing."
+            exit 1
+          fi
+
+          echo "$KEYSTORE_BASE64" | base64 --decode \
+            > android/app/lrcsync-release.jks
+
+          cat > android/key.properties <<EOF
+          storePassword=$KEYSTORE_PASSWORD
+          keyPassword=$KEY_PASSWORD
+          keyAlias=$KEY_ALIAS
+          storeFile=lrcsync-release.jks
+          EOF
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Analyze Dart code
+        run: flutter analyze
+
+      - name: Build split APKs
+        run: flutter build apk --release --split-per-abi
+
+      - name: Prepare APK artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p release-apks
+
+          VERSION=$(grep '^version:' pubspec.yaml \
+            | awk '{print $2}' | cut -d '+' -f 1)
+
+          for APK in build/app/outputs/flutter-apk/*-release.apk; do
+            ABI=$(basename "$APK" | sed -E \
+              's/^app-(.*)-release\.apk$/\1/')
+
+            cp "$APK" "release-apks/lrcsync-${VERSION}-${ABI}.apk"
+          done
+
+          ls -lh release-apks/
+
+      - name: Verify APK signatures
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          for APK in release-apks/*.apk; do
+            echo "Verifying $APK"
+            apksigner verify --verbose "$APK"
+          done
+
+      - name: Upload APK artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: lrcsync-android-apks
+          path: release-apks/*.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Clean up signing files
+        if: always()
+        shell: bash
+        run: |
+          rm -f android/key.properties
+          rm -f android/app/lrcsync-release.jks

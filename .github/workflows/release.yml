@@ -1,0 +1,104 @@
+name: Publish LRCSync Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish signed APKs
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: "3.24.0"
+          cache: true
+
+      - name: Restore Android signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -z "$KEYSTORE_BASE64" || -z "$KEYSTORE_PASSWORD" ||
+                -z "$KEY_PASSWORD" || -z "$KEY_ALIAS" ]]; then
+            echo "Android signing secrets are missing."
+            exit 1
+          fi
+
+          echo "$KEYSTORE_BASE64" | base64 --decode \
+            > android/app/lrcsync-release.jks
+
+          cat > android/key.properties <<EOF
+          storePassword=$KEYSTORE_PASSWORD
+          keyPassword=$KEY_PASSWORD
+          keyAlias=$KEY_ALIAS
+          storeFile=lrcsync-release.jks
+          EOF
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Analyze Dart code
+        run: flutter analyze
+
+      - name: Build signed split APKs
+        run: flutter build apk --release --split-per-abi
+
+      - name: Prepare release APKs
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          VERSION="${GITHUB_REF_NAME#v}"
+          mkdir -p release-apks
+
+          for APK in build/app/outputs/flutter-apk/*-release.apk; do
+            ABI=$(basename "$APK" | sed -E \
+              's/^app-(.*)-release\.apk$/\1/')
+
+            cp "$APK" "release-apks/lrcsync-${VERSION}-${ABI}.apk"
+          done
+
+          ls -lh release-apks/
+
+      - name: Verify APK signatures
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          for APK in release-apks/*.apk; do
+            echo "Verifying $APK"
+            apksigner verify --verbose "$APK"
+          done
+
+      - name: Attach APKs to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-apks/*.apk
+          fail_on_unmatched_files: true
+
+      - name: Clean up signing files
+        if: always()
+        run: |
+          rm -f android/key.properties
+          rm -f android/app/lrcsync-release.jks
