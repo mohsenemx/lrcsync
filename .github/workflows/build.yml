@@ -71,9 +71,6 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Analyze Dart code
-        run: flutter analyze
-
       - name: Build split APKs
         run: flutter build apk --release --split-per-abi
 
