@@ -23,9 +23,9 @@ It listens to the active Android `MediaSession` in real time, resolves the exact
 
 ## 📸 Screenshots
 
-| Now Playing | Local Library | Batch Downloader | Settings & Material You |
-| :---: | :---: | :---: | :---: |
-| ![Now Playing](assets/screenshots/now_playing.jpg) | ![Local Library](assets/screenshots/local_library.jpg) | ![Batch Downloader](assets/screenshots/batch_download.jpg) | ![Settings](assets/screenshots/settings.jpg) |
+| Now Playing | Local Library | Batch Downloader | Live Lyrics | Settings & Material You |
+| :---: | :---: | :---: | :---: | :---: |
+| ![Now Playing](assets/screenshots/now_playing.jpg) | ![Local Library](assets/screenshots/local_library.jpg) | ![Batch Downloader](assets/screenshots/batch_download.jpg) | ![Live Lyrics](assets/screenshots/lyrics.jpg) | ![Settings](assets/screenshots/settings.jpg) |
 
 ---
 
@@ -126,10 +126,19 @@ This repository's .gitignore excludes both.
 ```Bash
 flutter build apk --release
 ```
-## 🤝 Acknowledgements
-- LRCLIB for providing a free, open-source crowdsourced synced lyrics API.
 
-- LRC.red for providing ISRC-matched time-synced .lrc files.
+or split into different arch types:
+
+```Bash
+flutter build apk --release --split-per-abi
+```
+
+## 🤝 Acknowledgements
+- [LRCLIB](https://lrclib.net/) for providing a free, open-source crowdsourced synced lyrics API.
+
+- [LRC.red](https://lrc.red) for providing ISRC-matched time-synced .lrc files.
+
+- [LRCMux](https://lrcmux.dev/) for providing best available match across multiple sources.
 
 ## 📄 License
 This project is licensed under the MIT License — see the `LICENSE` file for details.
