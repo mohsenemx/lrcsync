@@ -11,9 +11,11 @@ import android.media.MediaMetadata
 import android.media.MediaMetadataRetriever
 import android.media.session.MediaController
 import android.media.session.MediaSessionManager
+import android.media.session.PlaybackState
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.os.SystemClock
 import android.provider.MediaStore
 import android.provider.Settings
 import android.util.Size
@@ -52,7 +54,11 @@ class MainActivity : FlutterActivity() {
 
     private val controllerCallback = object : MediaController.Callback() {
         override fun onMetadataChanged(metadata: MediaMetadata?) {
-            sendMetadataToFlutter(metadata, activeController?.packageName)
+            sendSessionStateToFlutter()
+        }
+
+        override fun onPlaybackStateChanged(state: PlaybackState?) {
+            sendSessionStateToFlutter()
         }
     }
 
@@ -396,11 +402,13 @@ class MainActivity : FlutterActivity() {
         activeController?.unregisterCallback(controllerCallback)
         activeController = controller
         activeController?.registerCallback(controllerCallback)
-        sendMetadataToFlutter(activeController?.metadata, activeController?.packageName)
+        sendSessionStateToFlutter()
     }
 
-    private fun sendMetadataToFlutter(metadata: MediaMetadata?, playerPackage: String?) {
-        if (metadata == null) {
+    private fun sendSessionStateToFlutter() {
+        val controller = activeController
+        val metadata = controller?.metadata
+        if (controller == null || metadata == null) {
             eventSink?.success(null)
             return
         }
@@ -409,6 +417,23 @@ class MainActivity : FlutterActivity() {
         val artist = metadata.getString(MediaMetadata.METADATA_KEY_ARTIST) ?: ""
         val album = metadata.getString(MediaMetadata.METADATA_KEY_ALBUM) ?: ""
         val duration = metadata.getLong(MediaMetadata.METADATA_KEY_DURATION)
+
+        val playbackState = controller.playbackState
+        val isPlaying = playbackState?.state == PlaybackState.STATE_PLAYING
+        val speed = if (playbackState != null && playbackState.playbackSpeed > 0f) {
+            playbackState.playbackSpeed.toDouble()
+        } else {
+            1.0
+        }
+
+        // Compute exact current position accounting for elapsed time since last state update
+        var currentPositionMs = playbackState?.position ?: 0L
+        if (isPlaying && playbackState != null && playbackState.lastPositionUpdateTime > 0L) {
+            val elapsed = SystemClock.elapsedRealtime() - playbackState.lastPositionUpdateTime
+            if (elapsed > 0) {
+                currentPositionMs += (elapsed * speed).toLong()
+            }
+        }
 
         val localMatch: Pair<String, Long>? = if (hasReadAudioPermission()) {
             resolveLocalTrackMatch(title, artist)
@@ -425,8 +450,12 @@ class MainActivity : FlutterActivity() {
             "album" to album,
             "albumId" to albumId,
             "durationMs" to duration,
+            "positionMs" to currentPositionMs,
+            "isPlaying" to isPlaying,
+            "playbackSpeed" to speed,
+            "timestampEpochMs" to System.currentTimeMillis(),
             "filePath" to filePath,
-            "playerPackage" to playerPackage,
+            "playerPackage" to controller.packageName,
             "artBytes" to artBytes
         )
         eventSink?.success(data)
@@ -440,7 +469,6 @@ class MainActivity : FlutterActivity() {
                 MediaStore.Audio.Media.ALBUM_ID
             )
 
-            // 1. Exact Title + Artist match (case-insensitive)
             contentResolver.query(
                 MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
                 projection,
@@ -455,7 +483,6 @@ class MainActivity : FlutterActivity() {
                 }
             }
 
-            // 2. Title match (case-insensitive)
             contentResolver.query(
                 MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
                 projection,
@@ -470,7 +497,6 @@ class MainActivity : FlutterActivity() {
                 }
             }
 
-            // 3. Fallback: Display Name (filename) contains Title
             contentResolver.query(
                 MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
                 projection,

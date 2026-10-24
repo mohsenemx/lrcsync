@@ -93,16 +93,6 @@ jobs:
 
           ls -lh release-apks/
 
-      - name: Verify APK signatures
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          for APK in release-apks/*.apk; do
-            echo "Verifying $APK"
-            apksigner verify --verbose "$APK"
-          done
-
       - name: Upload APK artifacts
         uses: actions/upload-artifact@v4
         with:

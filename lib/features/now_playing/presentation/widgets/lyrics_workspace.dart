@@ -276,17 +276,17 @@ class _LyricsWorkspaceState extends State<LyricsWorkspace> {
               Row(
                 children: [
                   Icon(
-                    widget.lyricsResult!.isSynced
-                        ? Icons.timer_outlined
-                        : Icons.subject_rounded,
+                    widget.lyricsResult!.isWordSynced
+                        ? Icons.auto_awesome_rounded
+                        : (widget.lyricsResult!.isSynced
+                              ? Icons.timer_outlined
+                              : Icons.subject_rounded),
                     size: 18,
                     color: scheme.primary,
                   ),
                   const SizedBox(width: 6),
                   Text(
-                    widget.lyricsResult!.isSynced
-                        ? 'Synced LRC'
-                        : 'Plain Lyrics',
+                    widget.lyricsResult!.syncType.label,
                     style: textTheme.labelLarge?.copyWith(
                       color: scheme.primary,
                       fontWeight: FontWeight.bold,

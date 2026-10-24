@@ -4,6 +4,7 @@ import 'core/settings/app_settings_controller.dart';
 import 'core/widgets/floating_nav_bar.dart';
 import 'features/library/presentation/controllers/library_controller.dart';
 import 'features/library/presentation/screens/library_screen.dart';
+import 'features/live_lyrics/presentation/screens/live_lyrics_screen.dart';
 import 'features/now_playing/presentation/controllers/now_playing_controller.dart';
 import 'features/now_playing/presentation/screens/now_playing_screen.dart';
 import 'features/now_playing/presentation/widgets/permissions_modal.dart';
@@ -66,7 +67,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    final safeIndex = _selectedIndex.clamp(0, 2);
+    final safeIndex = _selectedIndex.clamp(0, 3);
 
     return Scaffold(
       extendBody: true,
@@ -74,6 +75,10 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
         index: safeIndex,
         children: [
           NowPlayingScreen(
+            controller: widget.nowPlayingController,
+            settings: widget.settingsController,
+          ),
+          LiveLyricsScreen(
             controller: widget.nowPlayingController,
             settings: widget.settingsController,
           ),

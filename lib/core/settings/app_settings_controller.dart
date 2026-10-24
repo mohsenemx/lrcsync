@@ -1,6 +1,12 @@
 import 'package:flutter/material.dart';
 
 enum LyricsProvider {
+  lrcmux(
+    name: 'LRCMux',
+    baseUrl: 'https://api.lrcmux.dev',
+    description:
+        'Multi-source aggregator with word-by-word (Enhanced LRC) & line sync.',
+  ),
   lrclib(
     name: 'LRCLIB',
     baseUrl: 'https://lrclib.net',
@@ -29,7 +35,8 @@ class AppSettingsController extends ChangeNotifier {
   bool _amoledDark = false;
   Color _seedColor = const Color(0xFF6750A4);
 
-  LyricsProvider _primaryProvider = LyricsProvider.lrclib;
+  // LRCMux is now the default provider
+  LyricsProvider _primaryProvider = LyricsProvider.lrcmux;
   bool _useFallbackProvider = true;
   bool _preferLocalLrcFirst = true;
 

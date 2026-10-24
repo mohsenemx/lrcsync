@@ -6,6 +6,10 @@ class TrackInfo {
   final String album;
   final int? albumId;
   final Duration duration;
+  final int positionMs;
+  final bool isPlaying;
+  final double playbackSpeed;
+  final int timestampEpochMs;
   final String? filePath;
   final String? playerPackage;
   final Uint8List? artBytes;
@@ -17,6 +21,10 @@ class TrackInfo {
     required this.album,
     required this.duration,
     this.albumId,
+    this.positionMs = 0,
+    this.isPlaying = false,
+    this.playbackSpeed = 1.0,
+    this.timestampEpochMs = 0,
     this.filePath,
     this.playerPackage,
     this.artBytes,
@@ -24,7 +32,7 @@ class TrackInfo {
   });
 
   factory TrackInfo.fromMap(Map<dynamic, dynamic> map) {
-    final durationMs = (map['durationMs'] as int?) ?? 0;
+    final durationMs = (map['durationMs'] as num?)?.toInt() ?? 0;
     final rawArtist = (map['artist'] as String?)?.trim() ?? '';
     final rawAlbum = (map['album'] as String?)?.trim() ?? '';
 
@@ -40,11 +48,35 @@ class TrackInfo {
           : 'Unknown Album',
       albumId: (map['albumId'] as num?)?.toInt(),
       duration: Duration(milliseconds: durationMs > 0 ? durationMs : 0),
+      positionMs: (map['positionMs'] as num?)?.toInt() ?? 0,
+      isPlaying: (map['isPlaying'] as bool?) ?? false,
+      playbackSpeed: (map['playbackSpeed'] as num?)?.toDouble() ?? 1.0,
+      timestampEpochMs:
+          (map['timestampEpochMs'] as num?)?.toInt() ??
+          DateTime.now().millisecondsSinceEpoch,
       filePath: map['filePath'] as String?,
       playerPackage: map['playerPackage'] as String?,
       artBytes: map['artBytes'] as Uint8List?,
       hasLocalLrc: (map['hasLocalLrc'] as bool?) ?? false,
     );
+  }
+
+  /// Calculates the exact live playback position right now
+  Duration get estimatedLivePosition {
+    if (!isPlaying || timestampEpochMs <= 0) {
+      return Duration(
+        milliseconds: positionMs.clamp(
+          0,
+          duration.inMilliseconds > 0 ? duration.inMilliseconds : 86400000,
+        ),
+      );
+    }
+    final elapsed = DateTime.now().millisecondsSinceEpoch - timestampEpochMs;
+    final extrapolated = positionMs + (elapsed * playbackSpeed).round();
+    final maxMs = duration.inMilliseconds > 0
+        ? duration.inMilliseconds
+        : 86400000;
+    return Duration(milliseconds: extrapolated.clamp(0, maxMs));
   }
 
   TrackInfo copyWith({
@@ -59,6 +91,10 @@ class TrackInfo {
       album: album ?? this.album,
       albumId: albumId,
       duration: duration,
+      positionMs: positionMs,
+      isPlaying: isPlaying,
+      playbackSpeed: playbackSpeed,
+      timestampEpochMs: timestampEpochMs,
       filePath: filePath,
       playerPackage: playerPackage,
       artBytes: artBytes,

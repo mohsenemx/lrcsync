@@ -170,8 +170,8 @@ class SettingsScreen extends StatelessWidget {
                       const Divider(indent: 16, endIndent: 16),
                       SwitchListTile(
                         title: const Text('Automatic Fallback'),
-                        subtitle: Text(
-                          'Try ${settings.primaryProvider == LyricsProvider.lrclib ? LyricsProvider.lrcRed.name : LyricsProvider.lrclib.name} if primary finds no match',
+                        subtitle: const Text(
+                          'Try other enabled providers automatically if primary finds no match',
                         ),
                         value: settings.useFallbackProvider,
                         onChanged: settings.setUseFallbackProvider,
