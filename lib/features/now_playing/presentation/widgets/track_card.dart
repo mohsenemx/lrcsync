@@ -64,7 +64,7 @@ class TrackCard extends StatelessWidget {
                       ),
                       const SizedBox(width: 6),
                       Text(
-                        'Now Playing',
+                        'Now Playing • ${track.sourceAppName}',
                         style: textTheme.labelMedium?.copyWith(
                           color: scheme.onPrimaryContainer,
                           fontWeight: FontWeight.w600,

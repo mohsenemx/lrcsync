@@ -3,6 +3,7 @@ package com.github.lrcsync
 import android.Manifest
 import android.content.ComponentName
 import android.content.ContentUris
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -115,8 +116,61 @@ class MainActivity : FlutterActivity() {
                     val targetPath = call.argument<String>("targetPath")
                     val title = call.argument<String>("title") ?: ""
                     val artist = call.argument<String>("artist") ?: ""
+                    val playerPackage = call.argument<String>("playerPackage")
                     val content = call.argument<String>("content") ?: ""
-                    handleSaveLrcFile(targetPath, title, artist, content, result)
+                    handleSaveLrcFile(targetPath, title, artist, playerPackage, content, result)
+                }
+
+                "readInternalLrc" -> {
+                    val title = call.argument<String>("title") ?: ""
+                    val artist = call.argument<String>("artist") ?: ""
+                    val playerPackage = call.argument<String>("playerPackage")
+                    val content = readInternalCachedLrc(title, artist, playerPackage)
+                    result.success(content)
+                }
+
+                "saveLyricsScreenshot" -> {
+                    val bytes = call.argument<ByteArray>("bytes")
+                    val fileName = call.argument<String>("fileName") ?: "LRCSync_${System.currentTimeMillis()}.png"
+                    val share = call.argument<Boolean>("share") ?: false
+                    if (bytes == null) {
+                        result.success(mapOf("success" to false, "error" to "Empty image bytes"))
+                    } else {
+                        ioExecutor.execute {
+                            val res = saveAndOptionallyShareScreenshot(bytes, fileName, share)
+                            runOnUiThread { result.success(res) }
+                        }
+                    }
+                }
+
+                "seekTo" -> {
+                    val positionMs = (call.argument<Number>("positionMs"))?.toLong() ?: 0L
+                    val controller = getActiveOrCurrentController()
+                    controller?.transportControls?.seekTo(positionMs)
+                    result.success(controller != null)
+                }
+
+                "togglePlayPause" -> {
+                    val controller = getActiveOrCurrentController()
+                    val state = controller?.playbackState?.state
+                    if (state == PlaybackState.STATE_PLAYING) {
+                        controller?.transportControls?.pause()
+                    } else {
+                        controller?.transportControls?.play()
+                    }
+                    result.success(controller != null)
+                }
+
+                "clearInternalLyricsCache" -> {
+                    val dir = getInternalLyricsDir()
+                    val files = dir.listFiles() ?: emptyArray()
+                    var deletedCount = 0
+                    for (file in files) {
+                        if (file.isFile && file.delete()) {
+                            deletedCount++
+                        }
+                    }
+                    result.success(deletedCount)
                 }
 
                 else -> result.notImplemented()
@@ -136,6 +190,241 @@ class MainActivity : FlutterActivity() {
                 }
             }
         )
+    }
+
+    // --- INTERNAL STREAMING LYRICS CACHE (Spotify, YT Music, Telegram, etc.) ---
+
+    private fun getInternalLyricsDir(): File {
+        val dir = File(filesDir, "cached_lyrics")
+        if (!dir.exists()) dir.mkdirs()
+        return dir
+    }
+
+    private fun sanitizeKeyPart(input: String): String {
+        return input.trim().lowercase()
+            .replace(Regex("[^a-z0-9\\u00a0-\\uffff]+"), "_")
+            .trim('_')
+            .take(64)
+            .ifEmpty { "unknown" }
+    }
+
+    private fun getScopedCacheFile(title: String, artist: String, playerPackage: String?): File {
+        val pkg = sanitizeKeyPart(playerPackage ?: "any")
+        val art = sanitizeKeyPart(artist)
+        val tit = sanitizeKeyPart(title)
+        return File(getInternalLyricsDir(), "${pkg}__${art}__${tit}.lrc")
+    }
+
+    private fun getFallbackCacheFile(title: String, artist: String): File {
+        val art = sanitizeKeyPart(artist)
+        val tit = sanitizeKeyPart(title)
+        return File(getInternalLyricsDir(), "any__${art}__${tit}.lrc")
+    }
+
+    private fun readInternalCachedLrc(title: String, artist: String, playerPackage: String?): String? {
+        if (title.isBlank()) return null
+        try {
+            // 1. Check exact playerPackage + artist + title match first
+            if (!playerPackage.isNullOrBlank()) {
+                val scopedFile = getScopedCacheFile(title, artist, playerPackage)
+                if (scopedFile.exists()) {
+                    val text = scopedFile.readText(Charsets.UTF_8).trim()
+                    if (text.isNotEmpty()) return text
+                }
+            }
+            // 2. Check fallback artist + title match across any streaming player
+            val fallbackFile = getFallbackCacheFile(title, artist)
+            if (fallbackFile.exists()) {
+                val text = fallbackFile.readText(Charsets.UTF_8).trim()
+                if (text.isNotEmpty()) return text
+            }
+        } catch (_: Exception) {
+        }
+        return null
+    }
+
+    private fun getActiveOrCurrentController(): MediaController? {
+        if (activeController != null) return activeController
+        if (!isNotificationServiceEnabled()) return null
+        return try {
+            val componentName = ComponentName(this, MediaListenerService::class.java)
+            val manager = getSystemService(Context.MEDIA_SESSION_SERVICE) as MediaSessionManager
+            activeController = manager.getActiveSessions(componentName).firstOrNull()
+            activeController
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private val wordSyncRegex = Regex("<\\d{1,3}:\\d{2}(?:[.:]\\d{1,3})?>")
+    private val lineSyncRegex = Regex("\\[\\d{1,3}:\\d{2}(?:[.:]\\d{1,3})?\\]")
+
+    private fun detectLocalLrcType(lrcFile: File): String? {
+        if (!lrcFile.exists() || !lrcFile.isFile) return null
+        return try {
+            val content = lrcFile.readText(Charsets.UTF_8).trim()
+            if (content.isEmpty()) return null
+            when {
+                wordSyncRegex.containsMatchIn(content) -> "eLRC"
+                lineSyncRegex.containsMatchIn(content) -> "LRC"
+                else -> "Plain"
+            }
+        } catch (_: Exception) {
+            "LRC"
+        }
+    }
+
+    private fun saveInternalCachedLrc(
+        title: String,
+        artist: String,
+        playerPackage: String?,
+        content: String
+    ): File {
+        val scopedFile = getScopedCacheFile(title, artist, playerPackage)
+        scopedFile.writeText(content, Charsets.UTF_8)
+
+        // Also write to the app-agnostic fallback key so it's available if played elsewhere
+        val fallbackFile = getFallbackCacheFile(title, artist)
+        if (fallbackFile.absolutePath != scopedFile.absolutePath) {
+            fallbackFile.writeText(content, Charsets.UTF_8)
+        }
+        return scopedFile
+    }
+
+    // --- SAVE LRC (External beside audio file OR Internal app storage for Streaming/Telegram) ---
+
+    private fun handleSaveLrcFile(
+        targetPath: String?,
+        title: String,
+        artist: String,
+        playerPackage: String?,
+        content: String,
+        result: MethodChannel.Result
+    ) {
+        var resolvedLrcPath: String? = targetPath
+        if (resolvedLrcPath.isNullOrBlank() && hasReadAudioPermission()) {
+            val match: Pair<String, Long>? = resolveLocalTrackMatch(title, artist)
+            val audioPath: String? = match?.first
+            if (!audioPath.isNullOrBlank()) {
+                val dotIndex = audioPath.lastIndexOf('.')
+                resolvedLrcPath = if (dotIndex != -1) {
+                    "${audioPath.substring(0, dotIndex)}.lrc"
+                } else {
+                    "$audioPath.lrc"
+                }
+            }
+        }
+
+        // Case A: Song is from a streaming app (Spotify, YT Music) or Telegram internal storage
+        if (resolvedLrcPath.isNullOrBlank()) {
+            try {
+                val savedFile = saveInternalCachedLrc(title, artist, playerPackage, content)
+                result.success(
+                    mapOf(
+                        "success" to true,
+                        "isInternal" to true,
+                        "path" to savedFile.absolutePath
+                    )
+                )
+            } catch (e: Exception) {
+                result.success(
+                    mapOf(
+                        "success" to false,
+                        "error" to "Internal storage write failed: ${e.message}"
+                    )
+                )
+            }
+            return
+        }
+
+        // Case B: Song is a local audio file on device storage
+        if (!hasAllFilesWriteAccess()) {
+            openAllFilesAccessSettings()
+            result.success(
+                mapOf(
+                    "success" to false,
+                    "error" to "Please enable 'All files access' so LRCSync can write .lrc files directly."
+                )
+            )
+            return
+        }
+
+        try {
+            val file = File(resolvedLrcPath)
+            file.parentFile?.mkdirs()
+            file.writeText(content, Charsets.UTF_8)
+            result.success(
+                mapOf(
+                    "success" to true,
+                    "isInternal" to false,
+                    "path" to resolvedLrcPath
+                )
+            )
+        } catch (e: Exception) {
+            result.success(
+                mapOf(
+                    "success" to false,
+                    "error" to "Write failed: ${e.message}"
+                )
+            )
+        }
+    }
+
+    // --- SAVE & SHARE SPOTIFY-STYLE LYRICS SCREENSHOT ---
+
+    private fun saveAndOptionallyShareScreenshot(
+        bytes: ByteArray,
+        fileName: String,
+        share: Boolean
+    ): Map<String, Any?> {
+        return try {
+            val resolver = applicationContext.contentResolver
+            val contentValues = ContentValues().apply {
+                put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
+                put(MediaStore.Images.Media.MIME_TYPE, "image/png")
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    put(MediaStore.Images.Media.RELATIVE_PATH, "${Environment.DIRECTORY_PICTURES}/LRCSync")
+                    put(MediaStore.Images.Media.IS_PENDING, 1)
+                }
+            }
+
+            val imageUri: Uri = resolver.insert(
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                contentValues
+            ) ?: return mapOf("success" to false, "error" to "Could not create MediaStore entry")
+
+            resolver.openOutputStream(imageUri)?.use { out ->
+                out.write(bytes)
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                contentValues.clear()
+                contentValues.put(MediaStore.Images.Media.IS_PENDING, 0)
+                resolver.update(imageUri, contentValues, null, null)
+            }
+
+            if (share) {
+                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                    type = "image/png"
+                    putExtra(Intent.EXTRA_STREAM, imageUri)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                val chooser = Intent.createChooser(shareIntent, "Share Lyrics Card").apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                startActivity(chooser)
+            }
+
+            mapOf(
+                "success" to true,
+                "path" to "Pictures/LRCSync/$fileName"
+            )
+        } catch (e: Exception) {
+            mapOf(
+                "success" to false,
+                "error" to "Failed to save screenshot: ${e.message}"
+            )
+        }
     }
 
     private fun queryAllDeviceTracks(): List<Map<String, Any?>> {
@@ -183,7 +472,8 @@ class MainActivity : FlutterActivity() {
                     } else {
                         "$filePath.lrc"
                     }
-                    val hasLocalLrc = File(lrcPath).exists()
+                    val lrcFile = File(lrcPath)
+                    val localLrcType = detectLocalLrcType(lrcFile)
 
                     list.add(
                         mapOf(
@@ -193,7 +483,8 @@ class MainActivity : FlutterActivity() {
                             "albumId" to albumId,
                             "durationMs" to duration,
                             "filePath" to filePath,
-                            "hasLocalLrc" to hasLocalLrc
+                            "hasLocalLrc" to (localLrcType != null),
+                            "localLrcType" to localLrcType
                         )
                     )
                 }
@@ -258,68 +549,6 @@ class MainActivity : FlutterActivity() {
         val stream = ByteArrayOutputStream()
         scaled.compress(Bitmap.CompressFormat.JPEG, 85, stream)
         return stream.toByteArray()
-    }
-
-    private fun handleSaveLrcFile(
-        targetPath: String?,
-        title: String,
-        artist: String,
-        content: String,
-        result: MethodChannel.Result
-    ) {
-        if (!hasAllFilesWriteAccess()) {
-            openAllFilesAccessSettings()
-            result.success(
-                mapOf(
-                    "success" to false,
-                    "error" to "Please enable 'All files access' so LRCSync can write .lrc files directly."
-                )
-            )
-            return
-        }
-
-        var resolvedLrcPath: String? = targetPath
-        if (resolvedLrcPath.isNullOrBlank()) {
-            val match: Pair<String, Long>? = resolveLocalTrackMatch(title, artist)
-            val audioPath: String? = match?.first
-            if (!audioPath.isNullOrBlank()) {
-                val dotIndex = audioPath.lastIndexOf('.')
-                resolvedLrcPath = if (dotIndex != -1) {
-                    "${audioPath.substring(0, dotIndex)}.lrc"
-                } else {
-                    "$audioPath.lrc"
-                }
-            }
-        }
-
-        if (resolvedLrcPath.isNullOrBlank()) {
-            result.success(
-                mapOf(
-                    "success" to false,
-                    "error" to "Local audio file not found on device storage."
-                )
-            )
-            return
-        }
-
-        try {
-            val file = File(resolvedLrcPath)
-            file.parentFile?.mkdirs()
-            file.writeText(content, Charsets.UTF_8)
-            result.success(
-                mapOf(
-                    "success" to true,
-                    "path" to resolvedLrcPath
-                )
-            )
-        } catch (e: Exception) {
-            result.success(
-                mapOf(
-                    "success" to false,
-                    "error" to "Write failed: ${e.message}"
-                )
-            )
-        }
     }
 
     private fun hasReadAudioPermission(): Boolean {
@@ -426,7 +655,6 @@ class MainActivity : FlutterActivity() {
             1.0
         }
 
-        // Compute exact current position accounting for elapsed time since last state update
         var currentPositionMs = playbackState?.position ?: 0L
         if (isPlaying && playbackState != null && playbackState.lastPositionUpdateTime > 0L) {
             val elapsed = SystemClock.elapsedRealtime() - playbackState.lastPositionUpdateTime

@@ -294,10 +294,16 @@ class _LyricsWorkspaceState extends State<LyricsWorkspace> {
                   ),
                 ],
               ),
-              Text(
-                'via ${widget.lyricsResult!.sourceName}',
-                style: textTheme.labelMedium?.copyWith(
-                  color: scheme.onSurfaceVariant,
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  'via ${widget.lyricsResult!.sourceName}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.end,
+                  style: textTheme.labelMedium?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                  ),
                 ),
               ),
             ],

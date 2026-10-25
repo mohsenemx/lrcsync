@@ -4,17 +4,22 @@ import '../models/track_info.dart';
 
 class SaveLrcResult {
   final bool success;
+  final bool isInternal;
   final String? path;
   final String? error;
 
-  const SaveLrcResult({required this.success, this.path, this.error});
+  const SaveLrcResult({
+    required this.success,
+    this.isInternal = false,
+    this.path,
+    this.error,
+  });
 }
 
 class NativeMediaService {
   static const _methodChannel = MethodChannel('lrcsync/media_methods');
   static const _eventChannel = EventChannel('lrcsync/media_events');
 
-  // In-memory cover art cache keyed by albumId or filePath
   final Map<String, Uint8List?> _artCache = {};
 
   Stream<TrackInfo?> get trackStream {
@@ -79,10 +84,23 @@ class NativeMediaService {
     return bytes;
   }
 
+  Future<String?> readInternalLrc({
+    required String title,
+    required String artist,
+    String? playerPackage,
+  }) async {
+    return await _methodChannel.invokeMethod<String>('readInternalLrc', {
+      'title': title,
+      'artist': artist,
+      'playerPackage': playerPackage,
+    });
+  }
+
   Future<SaveLrcResult> saveLrcFile({
     required String? targetPath,
     required String title,
     required String artist,
+    String? playerPackage,
     required String content,
   }) async {
     final res = await _methodChannel.invokeMethod<Map<dynamic, dynamic>>(
@@ -91,6 +109,7 @@ class NativeMediaService {
         'targetPath': targetPath,
         'title': title,
         'artist': artist,
+        'playerPackage': playerPackage,
         'content': content,
       },
     );
@@ -101,8 +120,45 @@ class NativeMediaService {
 
     return SaveLrcResult(
       success: (res['success'] as bool?) ?? false,
+      isInternal: (res['isInternal'] as bool?) ?? false,
       path: res['path'] as String?,
       error: res['error'] as String?,
     );
+  }
+
+  Future<SaveLrcResult> saveLyricsScreenshot({
+    required Uint8List bytes,
+    required String fileName,
+    required bool share,
+  }) async {
+    final res = await _methodChannel.invokeMethod<Map<dynamic, dynamic>>(
+      'saveLyricsScreenshot',
+      {'bytes': bytes, 'fileName': fileName, 'share': share},
+    );
+
+    if (res == null) {
+      return const SaveLrcResult(success: false, error: 'Failed to save image');
+    }
+
+    return SaveLrcResult(
+      success: (res['success'] as bool?) ?? false,
+      path: res['path'] as String?,
+      error: res['error'] as String?,
+    );
+  }
+
+  Future<void> seekTo(Duration position) async {
+    await _methodChannel.invokeMethod('seekTo', {
+      'positionMs': position.inMilliseconds,
+    });
+  }
+
+  Future<void> togglePlayPause() async {
+    await _methodChannel.invokeMethod('togglePlayPause');
+  }
+
+  Future<int> clearInternalLyricsCache() async {
+    return await _methodChannel.invokeMethod<int>('clearInternalLyricsCache') ??
+        0;
   }
 }

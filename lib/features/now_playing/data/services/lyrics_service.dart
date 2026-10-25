@@ -7,18 +7,20 @@ import '../../../../core/settings/app_settings_controller.dart';
 import '../models/lyrics_result.dart';
 import '../models/parsed_lyrics.dart';
 import '../models/track_info.dart';
+import 'native_media_service.dart';
 
 class LyricsService {
   static const Map<String, String> _headers = {
-    'User-Agent': 'LRCSync/1.2.0 (https://github.com/lrcsync/app)',
+    'User-Agent': 'LRCSync/1.3.0 (https://github.com/lrcsync/app)',
     'Accept': 'application/json, text/plain, */*',
   };
 
   Future<LyricsResult?> fetchLyrics({
     required TrackInfo track,
-    required LyricsProvider primaryProvider,
+    required List<LyricsProvider> providersInOrder,
     required bool useFallback,
     required bool preferLocalFirst,
+    NativeMediaService? mediaService,
     String? customTitle,
     String? customArtist,
     String? customAlbum,
@@ -26,19 +28,35 @@ class LyricsService {
     final isManualRetry =
         customTitle != null || customArtist != null || customAlbum != null;
 
-    // 1. Check local .lrc file first if enabled
+    // 1A. Check local .lrc beside audio file if track is on device storage
     if (!isManualRetry && preferLocalFirst && track.expectedLrcPath != null) {
       final localFile = File(track.expectedLrcPath!);
       if (await localFile.exists()) {
-        final content = await localFile.readAsString();
-        if (content.trim().isNotEmpty) {
-          final clean = content.trim();
+        final content = (await localFile.readAsString()).trim();
+        if (content.isNotEmpty) {
           return LyricsResult(
-            content: clean,
-            syncType: ParsedLyrics.detectSyncType(clean),
+            content: content,
+            syncType: ParsedLyrics.detectSyncType(content),
             sourceName: 'Local Storage',
           );
         }
+      }
+    }
+
+    // 1B. Check LRCSync internal cache (for Spotify, YT Music, Telegram, etc.)
+    if (!isManualRetry && preferLocalFirst && mediaService != null) {
+      final cached = await mediaService.readInternalLrc(
+        title: track.title,
+        artist: track.artist,
+        playerPackage: track.playerPackage,
+      );
+      if (cached != null && cached.trim().isNotEmpty) {
+        final clean = cached.trim();
+        return LyricsResult(
+          content: clean,
+          syncType: ParsedLyrics.detectSyncType(clean),
+          sourceName: 'Cached',
+        );
       }
     }
 
@@ -48,32 +66,33 @@ class LyricsService {
         ? customAlbum.trim()
         : (track.album == 'Unknown Album' ? '' : track.album.trim());
 
-    if (effectiveTitle.isEmpty) return null;
+    if (effectiveTitle.isEmpty || providersInOrder.isEmpty) return null;
 
     final durationSec = isManualRetry ? 0 : track.duration.inSeconds;
+    final chain = useFallback ? providersInOrder : [providersInOrder.first];
 
-    // 2. Query Primary Provider
-    final primaryResult = await _fetchFromProvider(
-      title: effectiveTitle,
-      artist: effectiveArtist,
-      album: effectiveAlbum,
-      durationSeconds: durationSec,
-      provider: primaryProvider,
-    );
-    if (primaryResult != null) return primaryResult;
+    // 2. Cascade through providers in the user's configured priority order
+    for (final provider in chain) {
+      final result = await _fetchFromProvider(
+        title: effectiveTitle,
+        artist: effectiveArtist,
+        album: effectiveAlbum,
+        durationSeconds: durationSec,
+        provider: provider,
+      );
 
-    // 3. Query Remaining Fallback Providers in order
-    if (useFallback) {
-      for (final candidate in LyricsProvider.values) {
-        if (candidate == primaryProvider) continue;
-        final res = await _fetchFromProvider(
-          title: effectiveTitle,
-          artist: effectiveArtist,
-          album: effectiveAlbum,
-          durationSeconds: durationSec,
-          provider: candidate,
-        );
-        if (res != null) return res;
+      if (result != null) {
+        // If this song has no local filePath (streaming/Telegram), auto-cache it internally
+        if (track.isStreamingOrExternal && mediaService != null) {
+          await mediaService.saveLrcFile(
+            targetPath: null,
+            title: track.title,
+            artist: track.artist,
+            playerPackage: track.playerPackage,
+            content: result.content,
+          );
+        }
+        return result;
       }
     }
 
@@ -98,6 +117,7 @@ class LyricsService {
       case LyricsProvider.lrclib:
         return _fetchFromLrcLib(
           host: 'lrclib.net',
+          basePath: '/api',
           sourceLabel: 'LRCLIB',
           title: title,
           artist: artist,
@@ -123,47 +143,50 @@ class LyricsService {
   }) async {
     final cleanArtist = artist == 'Unknown Artist' ? '' : artist;
 
-    // 1. Try native LRCMux endpoint (/api/lyrics and /lyrics)
-    for (final path in ['/api/lyrics', '/lyrics']) {
-      try {
-        final params = <String, String>{
-          'title': title,
-          'track_name': title,
-          if (cleanArtist.isNotEmpty) 'artist': cleanArtist,
-          if (cleanArtist.isNotEmpty) 'artist_name': cleanArtist,
-          if (album.isNotEmpty) 'album': album,
-          if (album.isNotEmpty) 'album_name': album,
-          if (durationSeconds > 0) 'duration': durationSeconds.toString(),
-        };
+    // 1. Try LRCMux KPOE v2 compatibility endpoint (/compat/kpoe/v2/lyrics/get)
+    // This endpoint returns word-by-word (syllable) or line-synced JSON.
+    try {
+      final kpoeParams = <String, String>{
+        'title': title,
+        if (cleanArtist.isNotEmpty) 'artist': cleanArtist,
+        if (album.isNotEmpty) 'album': album,
+        if (durationSeconds > 0) 'duration': durationSeconds.toString(),
+      };
 
-        final uri = Uri.https('api.lrcmux.dev', path, params);
-        final res = await http
-            .get(uri, headers: _headers)
-            .timeout(const Duration(seconds: 10));
+      final kpoeUri = Uri.https(
+        'api.lrcmux.dev',
+        '/compat/kpoe/v2/lyrics/get',
+        kpoeParams,
+      );
+      final kpoeRes = await http
+          .get(kpoeUri, headers: _headers)
+          .timeout(const Duration(seconds: 12));
 
-        if (res.statusCode == 200) {
-          final parsed = _parseLrcMuxPayload(utf8.decode(res.bodyBytes));
-          if (parsed != null) return parsed;
-        }
-      } catch (_) {}
-    }
+      if (kpoeRes.statusCode == 200) {
+        final parsed = _parseKpoeOrMuxPayload(utf8.decode(kpoeRes.bodyBytes));
+        if (parsed != null) return parsed;
+      }
+    } catch (_) {}
 
-    // 2. Try LRCMux's LRCLIB-compatible endpoints (/api/get & /api/search)
-    return _fetchFromLrcLib(
+    // 2. Try LRCMux LRCLIB compatibility endpoints (/compat/lrclib/api/get & /search)
+    final lrclibCompatResult = await _fetchFromLrcLib(
       host: 'api.lrcmux.dev',
+      basePath: '/compat/lrclib/api',
       sourceLabel: 'LRCMux',
       title: title,
       artist: artist,
       album: album,
       durationSeconds: durationSeconds,
     );
+    if (lrclibCompatResult != null) return lrclibCompatResult;
+
+    return null;
   }
 
-  LyricsResult? _parseLrcMuxPayload(String bodyText) {
+  LyricsResult? _parseKpoeOrMuxPayload(String bodyText) {
     final trimmed = bodyText.trim();
     if (trimmed.isEmpty || trimmed.startsWith('<!DOCTYPE')) return null;
 
-    // Raw LRC / Enhanced LRC response
     if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) {
       return LyricsResult(
         content: trimmed,
@@ -174,105 +197,108 @@ class LyricsService {
 
     try {
       final decoded = jsonDecode(trimmed);
-      if (decoded is Map<String, dynamic>) {
-        final sourceAttr = (decoded['source'] ?? decoded['provider'] ?? '')
-            .toString()
-            .trim();
-        final label = sourceAttr.isNotEmpty ? 'LRCMux ($sourceAttr)' : 'LRCMux';
+      if (decoded is! Map<String, dynamic>) return null;
 
-        // Check for direct Enhanced LRC / word-synced text fields
-        for (final key in [
-          'enhancedLyrics',
-          'wordSyncedLyrics',
-          'richsync',
-          'elrc',
-          'syncedLyrics',
-          'lrc',
-          'lyrics',
-        ]) {
-          final val = decoded[key];
-          if (val is String && val.trim().isNotEmpty) {
-            final clean = val.trim();
-            return LyricsResult(
-              content: clean,
-              syncType: ParsedLyrics.detectSyncType(clean),
-              sourceName: label,
-            );
-          }
+      final dataMap = (decoded['data'] is Map<String, dynamic>)
+          ? decoded['data'] as Map<String, dynamic>
+          : decoded;
+
+      const sourceLabel = 'LRCMux';
+
+      // A. Direct LRC / Enhanced LRC string fields
+      for (final key in ['syncedLyrics', 'enhancedLyrics', 'elrc', 'lrc']) {
+        final val = dataMap[key];
+        if (val is String && val.trim().isNotEmpty) {
+          final clean = val.trim();
+          return LyricsResult(
+            content: clean,
+            syncType: ParsedLyrics.detectSyncType(clean),
+            sourceName: sourceLabel,
+          );
         }
+      }
 
-        // Check if structured lines/words array is returned and convert to Enhanced LRC
-        final linesList = decoded['lines'] ?? decoded['subtitles'];
-        if (linesList is List && linesList.isNotEmpty) {
-          final converted = _convertStructuredLinesToEnhancedLrc(linesList);
-          if (converted != null) {
-            return LyricsResult(
-              content: converted,
-              syncType: ParsedLyrics.detectSyncType(converted),
-              sourceName: label,
-            );
-          }
+      // B. KPOE v2 structured `lyrics` list (Line or Word/Syllable synced)
+      final lyricsList =
+          dataMap['lyrics'] ?? dataMap['lines'] ?? dataMap['subtitles'];
+      if (lyricsList is List && lyricsList.isNotEmpty) {
+        final syncTypeField = (dataMap['type'] ?? '').toString().toLowerCase();
+        final converted = _convertKpoeLinesToEnhancedLrc(
+          lyricsList,
+          syncTypeField,
+        );
+        if (converted != null) {
+          return LyricsResult(
+            content: converted,
+            syncType: ParsedLyrics.detectSyncType(converted),
+            sourceName: sourceLabel,
+          );
         }
+      }
 
-        // Plain text fallback
-        for (final key in ['plainLyrics', 'plain', 'text']) {
-          final val = decoded[key];
-          if (val is String && val.trim().isNotEmpty) {
-            return LyricsResult(
-              content: val.trim(),
-              syncType: LyricsSyncType.plain,
-              sourceName: label,
-            );
-          }
+      // C. Plain lyrics string
+      for (final key in ['plainLyrics', 'plain', 'text', 'lyrics']) {
+        final val = dataMap[key];
+        if (val is String && val.trim().isNotEmpty) {
+          final clean = val.trim();
+          return LyricsResult(
+            content: clean,
+            syncType: ParsedLyrics.detectSyncType(clean),
+            sourceName: sourceLabel,
+          );
         }
       }
     } catch (_) {}
+
     return null;
   }
 
-  String? _convertStructuredLinesToEnhancedLrc(List<dynamic> lines) {
+  String? _convertKpoeLinesToEnhancedLrc(
+    List<dynamic> lines,
+    String declaredType,
+  ) {
     final buffer = StringBuffer();
     for (final item in lines) {
       if (item is! Map<String, dynamic>) continue;
       final startMs = _extractMs(
-        item['startTime'] ?? item['start'] ?? item['time'],
+        item['time'] ?? item['startTime'] ?? item['start'],
       );
       final lineTag = _formatLrcTimestamp(startMs);
-      final words = item['words'] ?? item['syllables'];
+      final syllables = item['syllabus'] ?? item['words'] ?? item['syllables'];
 
-      if (words is List && words.isNotEmpty) {
+      if (syllables is List && syllables.isNotEmpty && declaredType != 'line') {
         buffer.write('$lineTag ');
-        for (final w in words) {
-          if (w is Map<String, dynamic>) {
-            final wStart = _extractMs(
-              w['startTime'] ?? w['start'] ?? w['time'] ?? startMs,
+        for (final s in syllables) {
+          if (s is Map<String, dynamic>) {
+            final sStart = _extractMs(
+              s['time'] ?? s['startTime'] ?? s['start'] ?? startMs,
             );
-            final wText = (w['text'] ?? w['word'] ?? '').toString();
-            if (wText.isNotEmpty) {
-              buffer.write('${_formatWordTimestamp(wStart)}$wText ');
+            final sText = (s['text'] ?? s['word'] ?? '').toString();
+            if (sText.isNotEmpty) {
+              buffer.write('${_formatWordTimestamp(sStart)}$sText');
+              if (!sText.endsWith(' ')) buffer.write(' ');
             }
           }
         }
         buffer.writeln();
       } else {
-        final text = (item['text'] ?? item['words'] ?? '').toString().trim();
+        final text = (item['text'] ?? '').toString().trim();
         buffer.writeln('$lineTag $text');
       }
     }
-    final result = buffer.toString().trim();
-    return result.isNotEmpty ? result : null;
+    final out = buffer.toString().trim();
+    return out.isNotEmpty ? out : null;
   }
 
   int _extractMs(dynamic value) {
     if (value is int) return value;
     if (value is double) {
-      // If value is in seconds (e.g. 14.52), convert to ms
       return value < 1000 ? (value * 1000).round() : value.round();
     }
     if (value is String) {
-      final numVal = double.tryParse(value);
-      if (numVal != null) {
-        return numVal < 1000 ? (numVal * 1000).round() : numVal.round();
+      final parsed = double.tryParse(value);
+      if (parsed != null) {
+        return parsed < 1000 ? (parsed * 1000).round() : parsed.round();
       }
     }
     return 0;
@@ -294,9 +320,10 @@ class LyricsService {
     return '<$min:$sec.$cs>';
   }
 
-  /// --- LRCLIB / LRCMUX-COMPATIBLE IMPLEMENTATION ---
+  /// --- LRCLIB & LRCMUX (/compat/lrclib/api) IMPLEMENTATION ---
   Future<LyricsResult?> _fetchFromLrcLib({
     required String host,
+    required String basePath,
     required String sourceLabel,
     required String title,
     required String artist,
@@ -306,16 +333,19 @@ class LyricsService {
     try {
       final cleanArtist = artist == 'Unknown Artist' ? '' : artist;
 
-      if (cleanArtist.isNotEmpty && durationSeconds > 0) {
-        final getUri = Uri.https(host, '/api/get', {
+      // Attempt 1: /get ( works with track_name & artist_name; duration/album optional on LRCMux )
+      if (cleanArtist.isNotEmpty) {
+        final getParams = <String, String>{
           'track_name': title,
           'artist_name': cleanArtist,
           if (album.isNotEmpty) 'album_name': album,
-          'duration': durationSeconds.toString(),
-        });
+          if (durationSeconds > 0) 'duration': durationSeconds.toString(),
+        };
+
+        final getUri = Uri.https(host, '$basePath/get', getParams);
         final getRes = await http
             .get(getUri, headers: _headers)
-            .timeout(const Duration(seconds: 10));
+            .timeout(const Duration(seconds: 12));
 
         if (getRes.statusCode == 200) {
           final data =
@@ -325,36 +355,34 @@ class LyricsService {
         }
       }
 
+      // Attempt 2: /search fallback
       final searchParams = <String, String>{
         'track_name': title,
         if (cleanArtist.isNotEmpty) 'artist_name': cleanArtist,
         if (album.isNotEmpty) 'album_name': album,
       };
 
-      final searchUri = Uri.https(host, '/api/search', searchParams);
+      final searchUri = Uri.https(host, '$basePath/search', searchParams);
       final searchRes = await http
           .get(searchUri, headers: _headers)
-          .timeout(const Duration(seconds: 10));
+          .timeout(const Duration(seconds: 12));
 
       if (searchRes.statusCode == 200) {
         final decoded = jsonDecode(utf8.decode(searchRes.bodyBytes));
         final list = decoded is List ? decoded : <dynamic>[];
 
-        // 1st priority: Word-by-word Enhanced LRC
         for (final item in list) {
           if (item is Map<String, dynamic>) {
             final record = _extractLrcLibRecord(item, sourceLabel);
             if (record != null && record.isWordSynced) return record;
           }
         }
-        // 2nd priority: Line-synced LRC
         for (final item in list) {
           if (item is Map<String, dynamic>) {
             final record = _extractLrcLibRecord(item, sourceLabel);
             if (record != null && record.isSynced) return record;
           }
         }
-        // 3rd priority: Plain lyrics
         for (final item in list) {
           if (item is Map<String, dynamic>) {
             final record = _extractLrcLibRecord(item, sourceLabel);
@@ -373,23 +401,7 @@ class LyricsService {
     final providerTag = (data['source'] ?? data['provider'] ?? '')
         .toString()
         .trim();
-    final effectiveLabel = providerTag.isNotEmpty
-        ? '$sourceLabel ($providerTag)'
-        : sourceLabel;
-
-    // If record includes structured words array
-    if (data['words'] is List && (data['words'] as List).isNotEmpty) {
-      final converted = _convertStructuredLinesToEnhancedLrc(
-        data['words'] as List,
-      );
-      if (converted != null) {
-        return LyricsResult(
-          content: converted,
-          syncType: ParsedLyrics.detectSyncType(converted),
-          sourceName: effectiveLabel,
-        );
-      }
-    }
+    final effectiveLabel = sourceLabel;
 
     final synced = (data['syncedLyrics'] as String?)?.trim();
     if (synced != null && synced.isNotEmpty) {

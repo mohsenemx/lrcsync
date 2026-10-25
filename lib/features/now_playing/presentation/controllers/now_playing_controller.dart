@@ -1,9 +1,11 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
 import '../../../../core/settings/app_settings_controller.dart';
 import '../../data/models/lyrics_result.dart';
+import '../../data/models/parsed_lyrics.dart';
 import '../../data/models/track_info.dart';
 import '../../data/services/lyrics_service.dart';
 import '../../data/services/native_media_service.dart';
@@ -70,9 +72,14 @@ class NowPlayingController extends ChangeNotifier {
     String? customTitle,
     String? customArtist,
     String? customAlbum,
+    bool forceRemote = false,
   }) async {
     final track = _currentTrack;
     if (track == null || _isFetchingLyrics) return;
+
+    // Bypass local/cached storage if user pressed Re-fetch or forced remote API
+    final shouldCheckLocalFirst =
+        !forceRemote && _lyricsResult == null && settings.preferLocalLrcFirst;
 
     _isFetchingLyrics = true;
     _lyricsError = null;
@@ -80,9 +87,10 @@ class NowPlayingController extends ChangeNotifier {
 
     final result = await lyricsService.fetchLyrics(
       track: track,
-      primaryProvider: settings.primaryProvider,
+      providersInOrder: settings.activeProvidersInOrder,
       useFallback: settings.useFallbackProvider,
-      preferLocalFirst: settings.preferLocalLrcFirst,
+      preferLocalFirst: shouldCheckLocalFirst,
+      mediaService: mediaService,
       customTitle: customTitle,
       customArtist: customArtist,
       customAlbum: customAlbum,
@@ -95,7 +103,7 @@ class NowPlayingController extends ChangeNotifier {
       final queriedTitle = customTitle?.isNotEmpty == true
           ? customTitle!
           : track.title;
-      _lyricsError = 'No lyrics found for "$queriedTitle".';
+      _lyricsError = 'No lyrics found online for "$queriedTitle".';
     }
     notifyListeners();
   }
@@ -114,12 +122,80 @@ class NowPlayingController extends ChangeNotifier {
       targetPath: track.expectedLrcPath,
       title: track.title,
       artist: track.artist,
+      playerPackage: track.playerPackage,
       content: lyrics.content,
     );
 
     _isSavingLyrics = false;
     notifyListeners();
     return result;
+  }
+
+  Future<void> seekTo(Duration position) async {
+    if (_currentTrack != null) {
+      // Optimistically update position & timestamp so the 60fps ticker doesn't snap back
+      _currentTrack = _currentTrack!.copyWith(
+        positionMs: position.inMilliseconds,
+        timestampEpochMs: DateTime.now().millisecondsSinceEpoch,
+      );
+      notifyListeners();
+    }
+    await mediaService.seekTo(position);
+  }
+
+  Future<void> togglePlayPause() async {
+    if (_currentTrack != null) {
+      final nowPlaying = !_currentTrack!.isPlaying;
+      final currentLiveMs = _currentTrack!.estimatedLivePosition.inMilliseconds;
+      _currentTrack = _currentTrack!.copyWith(
+        isPlaying: nowPlaying,
+        positionMs: currentLiveMs,
+        timestampEpochMs: DateTime.now().millisecondsSinceEpoch,
+      );
+      notifyListeners();
+    }
+    await mediaService.togglePlayPause();
+  }
+
+  Future<int> clearInternalCache() async {
+    return await mediaService.clearInternalLyricsCache();
+  }
+
+  Future<void> _autoLoadStoredLyricsForTrack(TrackInfo track) async {
+    // 1. Check local .lrc beside audio file
+    if (track.expectedLrcPath != null) {
+      final file = File(track.expectedLrcPath!);
+      if (await file.exists()) {
+        final content = (await file.readAsString()).trim();
+        if (content.isNotEmpty && _currentTrack?.title == track.title) {
+          _lyricsResult = LyricsResult(
+            content: content,
+            syncType: ParsedLyrics.detectSyncType(content),
+            sourceName: 'Local Storage',
+          );
+          notifyListeners();
+          return;
+        }
+      }
+    }
+
+    // 2. Check LRCSync internal cache (Spotify, YouTube Music, Telegram, etc.)
+    final cached = await mediaService.readInternalLrc(
+      title: track.title,
+      artist: track.artist,
+      playerPackage: track.playerPackage,
+    );
+    if (cached != null &&
+        cached.trim().isNotEmpty &&
+        _currentTrack?.title == track.title) {
+      final clean = cached.trim();
+      _lyricsResult = LyricsResult(
+        content: clean,
+        syncType: ParsedLyrics.detectSyncType(clean),
+        sourceName: 'Cached',
+      );
+      notifyListeners();
+    }
   }
 
   void _startListening() {
@@ -134,6 +210,9 @@ class NowPlayingController extends ChangeNotifier {
         _lyricsResult = null;
         _lyricsError = null;
         _isFetchingLyrics = false;
+        if (track != null) {
+          _autoLoadStoredLyricsForTrack(track);
+        }
       }
       notifyListeners();
     });

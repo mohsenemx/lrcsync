@@ -7,7 +7,10 @@ import '../../../now_playing/data/models/track_info.dart';
 import '../../../now_playing/data/services/lyrics_service.dart';
 import '../../../now_playing/data/services/native_media_service.dart';
 import '../../../now_playing/presentation/widgets/lyrics_workspace.dart';
+import '../../../now_playing/data/models/parsed_lyrics.dart';
 import '../controllers/library_controller.dart';
+
+import 'dart:io';
 
 class LibraryScreen extends StatefulWidget {
   final LibraryController controller;
@@ -51,7 +54,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
         mediaService: widget.controller.mediaService,
         lyricsService: widget.lyricsService,
         settings: widget.settings,
-        onLrcSaved: () => widget.controller.markTrackHasLrc(track.filePath),
+        onLrcSaved: (String lrcType) =>
+            widget.controller.markTrackHasLrc(track.filePath, lrcType: lrcType),
       ),
     );
   }
@@ -219,22 +223,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 if (track.hasLocalLrc)
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 8,
-                                      vertical: 4,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: scheme.primaryContainer,
-                                      borderRadius: BorderRadius.circular(8),
-                                    ),
-                                    child: Text(
-                                      'LRC',
-                                      style: textTheme.labelSmall?.copyWith(
-                                        color: scheme.onPrimaryContainer,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
+                                  _LrcTypeBadge(
+                                    type: track.localLrcType ?? 'LRC',
                                   )
                                 else
                                   Icon(
@@ -538,7 +528,7 @@ class _TrackLyricsModalSheet extends StatefulWidget {
   final NativeMediaService mediaService;
   final LyricsService lyricsService;
   final AppSettingsController settings;
-  final VoidCallback onLrcSaved;
+  final ValueChanged<String> onLrcSaved;
 
   const _TrackLyricsModalSheet({
     required this.track,
@@ -558,6 +548,30 @@ class _TrackLyricsModalSheetState extends State<_TrackLyricsModalSheet> {
   bool _isSaving = false;
   String? _error;
 
+  @override
+  void initState() {
+    super.initState();
+    _loadExistingLocalLrc();
+  }
+
+  Future<void> _loadExistingLocalLrc() async {
+    final lrcPath = widget.track.expectedLrcPath;
+    if (lrcPath == null) return;
+    final file = File(lrcPath);
+    if (await file.exists()) {
+      final content = (await file.readAsString()).trim();
+      if (content.isNotEmpty && mounted) {
+        setState(() {
+          _lyricsResult = LyricsResult(
+            content: content,
+            syncType: ParsedLyrics.detectSyncType(content),
+            sourceName: 'Local Storage',
+          );
+        });
+      }
+    }
+  }
+
   Future<void> _fetchLyrics({
     String? title,
     String? artist,
@@ -570,9 +584,11 @@ class _TrackLyricsModalSheetState extends State<_TrackLyricsModalSheet> {
 
     final res = await widget.lyricsService.fetchLyrics(
       track: widget.track,
-      primaryProvider: widget.settings.primaryProvider,
+      providersInOrder: widget.settings.activeProvidersInOrder,
       useFallback: widget.settings.useFallbackProvider,
-      preferLocalFirst: false,
+      preferLocalFirst:
+          false, // <-- Always query online API when button is pressed
+      mediaService: widget.mediaService,
       customTitle: title,
       customArtist: artist,
       customAlbum: album,
@@ -587,7 +603,7 @@ class _TrackLyricsModalSheetState extends State<_TrackLyricsModalSheet> {
         final queriedTitle = title?.isNotEmpty == true
             ? title!
             : widget.track.title;
-        _error = 'No lyrics found for "$queriedTitle".';
+        _error = 'No lyrics found online for "$queriedTitle".';
       }
     });
   }
@@ -607,7 +623,10 @@ class _TrackLyricsModalSheetState extends State<_TrackLyricsModalSheet> {
     setState(() => _isSaving = false);
 
     if (res.success) {
-      widget.onLrcSaved();
+      final badgeType = _lyricsResult!.isWordSynced
+          ? 'eLRC'
+          : (_lyricsResult!.isSynced ? 'LRC' : 'Plain');
+      widget.onLrcSaved(badgeType);
       Navigator.of(context).pop();
     }
 
@@ -616,7 +635,7 @@ class _TrackLyricsModalSheetState extends State<_TrackLyricsModalSheet> {
         behavior: SnackBarBehavior.floating,
         content: Text(
           res.success
-              ? 'Saved automatically to ${res.path}'
+              ? 'Saved to ${res.path}'
               : (res.error ?? 'Failed to save .lrc file.'),
         ),
       ),
@@ -687,6 +706,52 @@ class _TrackLyricsModalSheetState extends State<_TrackLyricsModalSheet> {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _LrcTypeBadge extends StatelessWidget {
+  final String type; // 'eLRC', 'LRC', or 'Plain'
+
+  const _LrcTypeBadge({required this.type});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+
+    final isElrc = type == 'eLRC';
+    final isPlain = type == 'Plain';
+
+    final bgColor = isElrc
+        ? scheme.tertiaryContainer
+        : (isPlain ? scheme.surfaceContainerHighest : scheme.primaryContainer);
+    final fgColor = isElrc
+        ? scheme.onTertiaryContainer
+        : (isPlain ? scheme.onSurfaceVariant : scheme.onPrimaryContainer);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (isElrc) ...[
+            Icon(Icons.auto_awesome_rounded, size: 12, color: fgColor),
+            const SizedBox(width: 4),
+          ],
+          Text(
+            type,
+            style: textTheme.labelSmall?.copyWith(
+              color: fgColor,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ],
       ),
     );
   }

@@ -8,6 +8,7 @@ import '../../../../core/widgets/album_art_view.dart';
 import '../../../now_playing/data/models/parsed_lyrics.dart';
 import '../../../now_playing/data/models/track_info.dart';
 import '../../../now_playing/presentation/controllers/now_playing_controller.dart';
+import '../widgets/lyrics_screenshot_sheet.dart';
 
 class LiveLyricsScreen extends StatefulWidget {
   final NowPlayingController controller;
@@ -33,6 +34,24 @@ class _LiveLyricsScreenState extends State<LiveLyricsScreen>
   String? _lastAutoFetchedTrackKey;
   List<GlobalKey> _lineKeys = [];
   int _lastLineCount = 0;
+  void _openScreenshotSheet() {
+    final track = widget.controller.currentTrack;
+    final parsed = widget.controller.lyricsResult?.parsed;
+    if (track == null || parsed == null || parsed.lines.isEmpty) return;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (_) => LyricsScreenshotSheet(
+        track: track,
+        parsedLyrics: parsed,
+        initialActiveIndex: _activeLineIndex,
+        mediaService: widget.controller.mediaService,
+      ),
+    );
+  }
 
   @override
   void initState() {
@@ -107,6 +126,14 @@ class _LiveLyricsScreenState extends State<LiveLyricsScreen>
         curve: Curves.easeOutCubic,
       );
     }
+  }
+
+  void _seekToPosition(Duration target, int lineIndex) {
+    widget.controller.seekTo(target);
+    setState(() {
+      _livePosition = target;
+      _activeLineIndex = lineIndex;
+    });
   }
 
   void _ensureLineKeys(int count) {
@@ -201,70 +228,94 @@ class _LiveLyricsScreenState extends State<LiveLyricsScreen>
                   syncType: parsed?.syncType,
                   onRefresh: () =>
                       widget.controller.fetchLyrics(widget.settings),
+                  onShareCard: parsed != null && parsed.lines.isNotEmpty
+                      ? _openScreenshotSheet
+                      : null,
                 ),
 
                 // Main Lyrics Visualizer Viewport
                 Expanded(child: _buildLyricsBody(context, parsed)),
 
-                // Live Progress Scrubber Bar
+                // Live Progress Scrubber Bar + Play/Pause Control
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(24, 8, 24, 96),
-                  child: Column(
+                  padding: const EdgeInsets.fromLTRB(20, 4, 20, 68),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(8),
-                        child: LinearProgressIndicator(
-                          minHeight: 5,
-                          value: track.duration.inMilliseconds > 0
-                              ? (_livePosition.inMilliseconds /
-                                        track.duration.inMilliseconds)
-                                    .clamp(0.0, 1.0)
-                              : 0.0,
+                      IconButton.filledTonal(
+                        style: IconButton.styleFrom(
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                         ),
+                        onPressed: widget.controller.togglePlayPause,
+                        icon: Icon(
+                          track.isPlaying
+                              ? Icons.pause_rounded
+                              : Icons.play_arrow_rounded,
+                        ),
+                        tooltip: track.isPlaying ? 'Pause' : 'Play',
                       ),
-                      const SizedBox(height: 6),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            _formatDuration(_livePosition),
-                            style: textTheme.labelSmall?.copyWith(
-                              color: scheme.onSurfaceVariant,
-                              fontFeatures: const [
-                                FontFeature.tabularFigures(),
-                              ],
-                            ),
-                          ),
-                          Row(
-                            children: [
-                              Icon(
-                                track.isPlaying
-                                    ? Icons.play_arrow_rounded
-                                    : Icons.pause_rounded,
-                                size: 14,
-                                color: scheme.primary,
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const SizedBox(height: 8),
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(8),
+                              child: LinearProgressIndicator(
+                                minHeight: 5,
+                                value: track.duration.inMilliseconds > 0
+                                    ? (_livePosition.inMilliseconds /
+                                              track.duration.inMilliseconds)
+                                          .clamp(0.0, 1.0)
+                                    : 0.0,
                               ),
-                              const SizedBox(width: 4),
-                              Text(
-                                track.isPlaying ? 'LIVE SYNC' : 'PAUSED',
-                                style: textTheme.labelSmall?.copyWith(
-                                  color: scheme.primary,
-                                  fontWeight: FontWeight.bold,
-                                  letterSpacing: 0.8,
+                            ),
+                            const SizedBox(height: 6),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  _formatDuration(_livePosition),
+                                  style: textTheme.labelSmall?.copyWith(
+                                    color: scheme.onSurfaceVariant,
+                                    fontFeatures: const [
+                                      FontFeature.tabularFigures(),
+                                    ],
+                                  ),
                                 ),
-                              ),
-                            ],
-                          ),
-                          Text(
-                            track.formattedDuration,
-                            style: textTheme.labelSmall?.copyWith(
-                              color: scheme.onSurfaceVariant,
-                              fontFeatures: const [
-                                FontFeature.tabularFigures(),
+                                Text(
+                                  [
+                                    track.isPlaying ? 'LIVE' : 'PAUSED',
+                                    if (parsed != null)
+                                      parsed.syncType ==
+                                              LyricsSyncType.wordByWord
+                                          ? 'WORD SYNC'
+                                          : (parsed.syncType ==
+                                                    LyricsSyncType.lineByLine
+                                                ? 'LINE SYNC'
+                                                : 'PLAIN'),
+                                  ].join(' • '),
+                                  style: textTheme.labelSmall?.copyWith(
+                                    color: scheme.primary,
+                                    fontWeight: FontWeight.bold,
+                                    letterSpacing: 0.6,
+                                  ),
+                                ),
+                                Text(
+                                  track.formattedDuration,
+                                  style: textTheme.labelSmall?.copyWith(
+                                    color: scheme.onSurfaceVariant,
+                                    fontFeatures: const [
+                                      FontFeature.tabularFigures(),
+                                    ],
+                                  ),
+                                ),
                               ],
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                     ],
                   ),
@@ -349,44 +400,51 @@ class _LiveLyricsScreenState extends State<LiveLyricsScreen>
           final isPast = index < _activeLineIndex;
           final distance = (_activeLineIndex - index).abs();
 
-          return Container(
+          return GestureDetector(
             key: _lineKeys[index],
-            padding: const EdgeInsets.symmetric(vertical: 14),
-            child: AnimatedScale(
-              scale: isActive ? 1.03 : 0.94,
-              alignment: Alignment.centerLeft,
-              duration: const Duration(milliseconds: 350),
-              curve: Curves.easeOutBack,
-              child: AnimatedOpacity(
-                duration: const Duration(milliseconds: 320),
-                opacity: isActive
-                    ? 1.0
-                    : (isPast ? 0.30 : (distance == 1 ? 0.55 : 0.35)),
-                child: line.hasWords && isActive
-                    ? _WordByWordActiveLine(
-                        line: line,
-                        livePosition: _livePosition,
-                      )
-                    : Text(
-                        line.text.isEmpty ? '•••' : line.text,
-                        style: textTheme.headlineSmall?.copyWith(
-                          fontWeight: isActive
-                              ? FontWeight.w800
-                              : FontWeight.w600,
-                          color: isActive ? scheme.primary : scheme.onSurface,
-                          height: 1.35,
-                          shadows: isActive
-                              ? [
-                                  Shadow(
-                                    color: scheme.primary.withValues(
-                                      alpha: 0.35,
+            behavior: HitTestBehavior.opaque,
+            onTap: () => _seekToPosition(line.startTime, index),
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 4),
+              child: AnimatedScale(
+                scale: isActive ? 1.03 : 0.94,
+                alignment: Alignment.centerLeft,
+                duration: const Duration(milliseconds: 350),
+                curve: Curves.easeOutBack,
+                child: AnimatedOpacity(
+                  duration: const Duration(milliseconds: 320),
+                  opacity: isActive
+                      ? 1.0
+                      : (isPast ? 0.30 : (distance == 1 ? 0.55 : 0.35)),
+                  child: line.hasWords && isActive
+                      ? _WordByWordActiveLine(
+                          line: line,
+                          livePosition: _livePosition,
+                          onWordTap: (wordStart) =>
+                              _seekToPosition(wordStart, index),
+                        )
+                      : Text(
+                          line.text.isEmpty ? '•••' : line.text,
+                          style: textTheme.headlineSmall?.copyWith(
+                            fontWeight: isActive
+                                ? FontWeight.w800
+                                : FontWeight.w600,
+                            color: isActive ? scheme.primary : scheme.onSurface,
+                            height: 1.35,
+                            shadows: isActive
+                                ? [
+                                    Shadow(
+                                      color: scheme.primary.withValues(
+                                        alpha: 0.35,
+                                      ),
+                                      blurRadius: 18,
                                     ),
-                                    blurRadius: 18,
-                                  ),
-                                ]
-                              : null,
+                                  ]
+                                : null,
+                          ),
                         ),
-                      ),
+                ),
               ),
             ),
           );
@@ -399,8 +457,13 @@ class _LiveLyricsScreenState extends State<LiveLyricsScreen>
 class _WordByWordActiveLine extends StatelessWidget {
   final LyricLine line;
   final Duration livePosition;
+  final ValueChanged<Duration>? onWordTap;
 
-  const _WordByWordActiveLine({required this.line, required this.livePosition});
+  const _WordByWordActiveLine({
+    required this.line,
+    required this.livePosition,
+    this.onWordTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -423,36 +486,61 @@ class _WordByWordActiveLine extends StatelessWidget {
         // Subtle upward float while a word is actively being sung
         final verticalOffset = isCurrentlySinging ? -3.0 : 0.0;
 
-        return AnimatedContainer(
-          duration: const Duration(milliseconds: 120),
-          transform: Matrix4.translationValues(0, verticalOffset, 0),
-          child: ShaderMask(
-            blendMode: BlendMode.srcIn,
-            shaderCallback: (bounds) {
-              return LinearGradient(
-                begin: Alignment.centerLeft,
-                end: Alignment.centerRight,
-                stops: [progress, (progress + 0.08).clamp(0.0, 1.0)],
-                colors: [
-                  scheme.primary,
-                  scheme.onSurface.withValues(alpha: 0.35),
-                ],
-              ).createShader(bounds);
-            },
-            child: Text(
-              word.text.endsWith(' ') ? word.text : '${word.text} ',
-              style: baseStyle?.copyWith(
-                color: Colors.white,
-                shadows: progress > 0
-                    ? [
+        return GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: onWordTap != null ? () => onWordTap!(word.startTime) : null,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 120),
+            transform: Matrix4.translationValues(0, verticalOffset, 0),
+            child: progress <= 0.0
+                ? Text(
+                    word.text.endsWith(' ') ? word.text : '${word.text} ',
+                    style: baseStyle?.copyWith(
+                      color: scheme.onSurface.withValues(alpha: 0.35),
+                    ),
+                  )
+                : progress >= 1.0
+                ? Text(
+                    word.text.endsWith(' ') ? word.text : '${word.text} ',
+                    style: baseStyle?.copyWith(
+                      color: scheme.primary,
+                      shadows: [
                         Shadow(
                           color: scheme.primary.withValues(alpha: 0.45),
                           blurRadius: 16,
                         ),
-                      ]
-                    : null,
-              ),
-            ),
+                      ],
+                    ),
+                  )
+                : ShaderMask(
+                    blendMode: BlendMode.srcIn,
+                    shaderCallback: (bounds) {
+                      return LinearGradient(
+                        begin: Alignment.centerLeft,
+                        end: Alignment.centerRight,
+                        stops: [
+                          (progress - 0.03).clamp(0.0, 1.0),
+                          (progress + 0.03).clamp(0.0, 1.0),
+                        ],
+                        colors: [
+                          scheme.primary,
+                          scheme.onSurface.withValues(alpha: 0.35),
+                        ],
+                      ).createShader(bounds);
+                    },
+                    child: Text(
+                      word.text.endsWith(' ') ? word.text : '${word.text} ',
+                      style: baseStyle?.copyWith(
+                        color: Colors.white,
+                        shadows: [
+                          Shadow(
+                            color: scheme.primary.withValues(alpha: 0.45),
+                            blurRadius: 16,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
           ),
         );
       }).toList(),
@@ -465,12 +553,14 @@ class _LiveTrackHeader extends StatelessWidget {
   final NowPlayingController controller;
   final LyricsSyncType? syncType;
   final VoidCallback onRefresh;
+  final VoidCallback? onShareCard;
 
   const _LiveTrackHeader({
     required this.track,
     required this.controller,
     required this.syncType,
     required this.onRefresh,
+    this.onShareCard,
   });
 
   @override
@@ -479,7 +569,7 @@ class _LiveTrackHeader extends StatelessWidget {
     final textTheme = Theme.of(context).textTheme;
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 12, 16, 8),
+      padding: const EdgeInsets.fromLTRB(20, 12, 12, 8),
       child: Row(
         children: [
           AlbumArtView(
@@ -495,15 +585,16 @@ class _LiveTrackHeader extends StatelessWidget {
               children: [
                 Text(
                   track.title,
-                  maxLines: 1,
+                  maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.bold,
+                    height: 1.2,
                   ),
                 ),
-                const SizedBox(height: 2),
+                const SizedBox(height: 3),
                 Text(
-                  track.artist,
+                  '${track.artist} • ${track.sourceAppName}',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: textTheme.bodySmall?.copyWith(
@@ -513,30 +604,12 @@ class _LiveTrackHeader extends StatelessWidget {
               ],
             ),
           ),
-          if (syncType != null)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-              decoration: BoxDecoration(
-                color: scheme.primaryContainer,
-                borderRadius: BorderRadius.circular(100),
-              ),
-              child: Text(
-                syncType == LyricsSyncType.wordByWord
-                    ? 'WORD SYNC'
-                    : (syncType == LyricsSyncType.lineByLine
-                          ? 'LINE SYNC'
-                          : 'PLAIN'),
-                style: textTheme.labelSmall?.copyWith(
-                  color: scheme.onPrimaryContainer,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
+          if (onShareCard != null)
+            IconButton(
+              icon: const Icon(Icons.photo_camera_back_rounded),
+              tooltip: 'Create Lyrics Card',
+              onPressed: onShareCard,
             ),
-          IconButton(
-            icon: const Icon(Icons.refresh_rounded),
-            tooltip: 'Re-fetch Lyrics',
-            onPressed: onRefresh,
-          ),
         ],
       ),
     );

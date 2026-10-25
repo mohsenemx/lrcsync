@@ -78,11 +78,14 @@ class LibraryController extends ChangeNotifier {
     notifyListeners();
   }
 
-  void markTrackHasLrc(String? filePath) {
+  void markTrackHasLrc(String? filePath, {String lrcType = 'LRC'}) {
     if (filePath == null) return;
     final index = _allTracks.indexWhere((t) => t.filePath == filePath);
     if (index != -1) {
-      _allTracks[index] = _allTracks[index].copyWith(hasLocalLrc: true);
+      _allTracks[index] = _allTracks[index].copyWith(
+        hasLocalLrc: true,
+        localLrcType: lrcType,
+      );
       notifyListeners();
     }
   }
@@ -123,9 +126,10 @@ class LibraryController extends ChangeNotifier {
       // Fetch lyrics online
       final result = await lyricsService.fetchLyrics(
         track: track,
-        primaryProvider: settings.primaryProvider,
+        providersInOrder: settings.activeProvidersInOrder,
         useFallback: settings.useFallbackProvider,
         preferLocalFirst: false,
+        mediaService: mediaService,
       );
 
       if (_cancelBatchRequested) break;
@@ -140,7 +144,10 @@ class LibraryController extends ChangeNotifier {
 
         if (saveRes.success) {
           _batchSucceeded++;
-          markTrackHasLrc(track.filePath);
+          final badgeType = result.isWordSynced
+              ? 'eLRC'
+              : (result.isSynced ? 'LRC' : 'Plain');
+          markTrackHasLrc(track.filePath, lrcType: badgeType);
         } else {
           _batchFailed++;
         }

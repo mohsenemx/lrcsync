@@ -21,18 +21,18 @@ class NowPlayingScreen extends StatefulWidget {
 
 class _NowPlayingScreenState extends State<NowPlayingScreen> {
   Future<void> _handleSaveLyrics() async {
+    final track = widget.controller.currentTrack;
     final result = await widget.controller.saveLyricsToStorage();
     if (!mounted) return;
 
+    final message = result.success
+        ? (result.isInternal
+              ? 'Saved to LRCSync internal cache for ${track?.sourceAppName ?? 'Streaming App'}!'
+              : 'Saved automatically to ${result.path}')
+        : (result.error ?? 'Failed to save .lrc file.');
+
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        behavior: SnackBarBehavior.floating,
-        content: Text(
-          result.success
-              ? 'Saved automatically to ${result.path}'
-              : (result.error ?? 'Failed to save .lrc file.'),
-        ),
-      ),
+      SnackBar(behavior: SnackBarBehavior.floating, content: Text(message)),
     );
   }
 
@@ -71,17 +71,6 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
           return ListView(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 120),
             children: [
-              Align(
-                alignment: Alignment.centerLeft,
-                child: ActionChip(
-                  avatar: const Icon(Icons.cloud_outlined, size: 16),
-                  label: Text(
-                    'Source: ${widget.settings.primaryProvider.name}',
-                  ),
-                  onPressed: null,
-                ),
-              ),
-              const SizedBox(height: 12),
               if (widget.controller.currentTrack != null)
                 TrackCard(
                   track: widget.controller.currentTrack!,
@@ -96,6 +85,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                         customTitle: title,
                         customArtist: artist,
                         customAlbum: album,
+                        forceRemote: true,
                       ),
                   onSaveLyrics: _handleSaveLyrics,
                 )

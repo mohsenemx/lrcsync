@@ -14,7 +14,7 @@ class TrackInfo {
   final String? playerPackage;
   final Uint8List? artBytes;
   final bool hasLocalLrc;
-
+  final String? localLrcType; // 'eLRC', 'LRC', or 'Plain'
   const TrackInfo({
     required this.title,
     required this.artist,
@@ -29,7 +29,39 @@ class TrackInfo {
     this.playerPackage,
     this.artBytes,
     this.hasLocalLrc = false,
+    this.localLrcType,
   });
+
+  /// True when the song is not in local MediaStore (e.g. Spotify, YT Music, Telegram)
+  bool get isStreamingOrExternal => filePath == null || filePath!.isEmpty;
+
+  /// Friendly display name of the source player app
+  String get sourceAppName {
+    final pkg = (playerPackage ?? '').toLowerCase();
+    if (pkg.contains('spotify')) return 'Spotify';
+    if (pkg.contains('youtube.music') ||
+        pkg.contains('vanced.android.apps.youtube.music')) {
+      return 'YouTube Music';
+    }
+    if (pkg.contains('youtube')) return 'YouTube';
+    if (pkg.contains('telegram') ||
+        pkg.contains('nekogram') ||
+        pkg.contains('plus')) {
+      return 'Telegram';
+    }
+    if (pkg.contains('soundcloud')) return 'SoundCloud';
+    if (pkg.contains('apple.android.music')) return 'Apple Music';
+    if (pkg.contains('deezer')) return 'Deezer';
+    if (pkg.contains('tidal')) return 'Tidal';
+    if (pkg.contains('musicolet')) return 'Musicolet';
+    if (pkg.contains('poweramp')) return 'Poweramp';
+    if (pkg.isNotEmpty) {
+      final parts = pkg.split('.');
+      final last = parts.last;
+      return last[0].toUpperCase() + last.substring(1);
+    }
+    return isStreamingOrExternal ? 'Streaming App' : 'Local Player';
+  }
 
   factory TrackInfo.fromMap(Map<dynamic, dynamic> map) {
     final durationMs = (map['durationMs'] as num?)?.toInt() ?? 0;
@@ -58,10 +90,10 @@ class TrackInfo {
       playerPackage: map['playerPackage'] as String?,
       artBytes: map['artBytes'] as Uint8List?,
       hasLocalLrc: (map['hasLocalLrc'] as bool?) ?? false,
+      localLrcType: map['localLrcType'] as String?,
     );
   }
 
-  /// Calculates the exact live playback position right now
   Duration get estimatedLivePosition {
     if (!isPlaying || timestampEpochMs <= 0) {
       return Duration(
@@ -83,7 +115,11 @@ class TrackInfo {
     String? title,
     String? artist,
     String? album,
+    int? positionMs,
+    bool? isPlaying,
+    int? timestampEpochMs,
     bool? hasLocalLrc,
+    String? localLrcType,
   }) {
     return TrackInfo(
       title: title ?? this.title,
@@ -91,19 +127,20 @@ class TrackInfo {
       album: album ?? this.album,
       albumId: albumId,
       duration: duration,
-      positionMs: positionMs,
-      isPlaying: isPlaying,
+      positionMs: positionMs ?? this.positionMs,
+      isPlaying: isPlaying ?? this.isPlaying,
       playbackSpeed: playbackSpeed,
-      timestampEpochMs: timestampEpochMs,
+      timestampEpochMs: timestampEpochMs ?? this.timestampEpochMs,
       filePath: filePath,
       playerPackage: playerPackage,
       artBytes: artBytes,
       hasLocalLrc: hasLocalLrc ?? this.hasLocalLrc,
+      localLrcType: localLrcType ?? this.localLrcType,
     );
   }
 
   String? get expectedLrcPath {
-    if (filePath == null) return null;
+    if (filePath == null || filePath!.isEmpty) return null;
     final lastDot = filePath!.lastIndexOf('.');
     if (lastDot == -1) return '${filePath!}.lrc';
     return '${filePath!.substring(0, lastDot)}.lrc';

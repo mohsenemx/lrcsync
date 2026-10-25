@@ -24,11 +24,13 @@ class SettingsScreen extends StatelessWidget {
       body: ListenableBuilder(
         listenable: settings,
         builder: (context, _) {
+          final providers = settings.providerPriority;
+
           return ListView(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 120),
             children: [
               // --- APPEARANCE / THEME SECTION ---
-              _SectionHeader(title: 'Appearance'),
+              const _SectionHeader(title: 'Appearance'),
               Card(
                 child: Padding(
                   padding: const EdgeInsets.all(16),
@@ -40,21 +42,33 @@ class SettingsScreen extends StatelessWidget {
                       SizedBox(
                         width: double.infinity,
                         child: SegmentedButton<ThemeMode>(
+                          showSelectedIcon: false,
                           segments: const [
                             ButtonSegment(
                               value: ThemeMode.system,
-                              icon: Icon(Icons.brightness_auto_rounded),
-                              label: Text('System'),
+                              icon: Icon(
+                                Icons.brightness_auto_rounded,
+                                size: 18,
+                              ),
+                              label: Text(
+                                'System',
+                                maxLines: 1,
+                                softWrap: false,
+                              ),
                             ),
                             ButtonSegment(
                               value: ThemeMode.light,
-                              icon: Icon(Icons.light_mode_rounded),
-                              label: Text('Light'),
+                              icon: Icon(Icons.light_mode_rounded, size: 18),
+                              label: Text(
+                                'Light',
+                                maxLines: 1,
+                                softWrap: false,
+                              ),
                             ),
                             ButtonSegment(
                               value: ThemeMode.dark,
-                              icon: Icon(Icons.dark_mode_rounded),
-                              label: Text('Dark'),
+                              icon: Icon(Icons.dark_mode_rounded, size: 18),
+                              label: Text('Dark', maxLines: 1, softWrap: false),
                             ),
                           ],
                           selected: {settings.themeMode},
@@ -119,67 +133,133 @@ class SettingsScreen extends StatelessWidget {
               ),
               const SizedBox(height: 20),
 
-              // --- LYRICS PROVIDERS SECTION ---
-              _SectionHeader(title: 'Lyrics Providers'),
+              // --- ADJUSTABLE LYRICS PROVIDERS PRIORITY LIST ---
+              const _SectionHeader(title: 'Lyrics Providers & Priority Order'),
               Card(
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
                   child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      ...LyricsProvider.values.map((provider) {
-                        return RadioListTile<LyricsProvider>(
-                          value: provider,
-                          groupValue: settings.primaryProvider,
-                          onChanged: (val) {
-                            if (val != null) settings.setPrimaryProvider(val);
-                          },
-                          title: Row(
-                            children: [
-                              Text(
-                                provider.name,
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w600,
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        child: Text(
+                          'Drag to reorder priority. LRCSync queries #1 first and falls back down the list until lyrics are found.',
+                          style: textTheme.bodySmall?.copyWith(
+                            color: scheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      ReorderableListView.builder(
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        buildDefaultDragHandles: false,
+                        itemCount: providers.length,
+                        onReorder: settings.reorderProviders,
+                        itemBuilder: (context, index) {
+                          final provider = providers[index];
+                          final isEnabled = settings.isProviderEnabled(
+                            provider,
+                          );
+
+                          return ListTile(
+                            key: ValueKey(provider.name),
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 4,
+                            ),
+                            leading: CircleAvatar(
+                              radius: 16,
+                              backgroundColor: isEnabled
+                                  ? scheme.primaryContainer
+                                  : scheme.surfaceContainerHighest,
+                              child: Text(
+                                '#${index + 1}',
+                                style: textTheme.labelMedium?.copyWith(
+                                  color: isEnabled
+                                      ? scheme.onPrimaryContainer
+                                      : scheme.outline,
+                                  fontWeight: FontWeight.bold,
                                 ),
                               ),
-                              const SizedBox(width: 8),
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 8,
-                                  vertical: 2,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: scheme.secondaryContainer,
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: Text(
-                                  'FREE',
-                                  style: textTheme.labelSmall?.copyWith(
-                                    color: scheme.onSecondaryContainer,
-                                    fontWeight: FontWeight.bold,
+                            ),
+                            title: Row(
+                              children: [
+                                Text(
+                                  provider.name,
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                    color: isEnabled
+                                        ? scheme.onSurface
+                                        : scheme.outline,
                                   ),
                                 ),
+                                const SizedBox(width: 8),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 2,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: scheme.secondaryContainer,
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Text(
+                                    'FREE',
+                                    style: textTheme.labelSmall?.copyWith(
+                                      color: scheme.onSecondaryContainer,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            subtitle: Text(
+                              '${provider.description}\n${provider.baseUrl}',
+                              style: textTheme.bodySmall?.copyWith(
+                                color: isEnabled
+                                    ? scheme.onSurfaceVariant
+                                    : scheme.outline,
                               ),
-                            ],
-                          ),
-                          subtitle: Text(
-                            '${provider.description}\n${provider.baseUrl}',
-                          ),
-                          isThreeLine: true,
-                        );
-                      }),
+                            ),
+                            isThreeLine: true,
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Switch(
+                                  value: isEnabled,
+                                  onChanged: (val) => settings
+                                      .toggleProviderEnabled(provider, val),
+                                ),
+                                ReorderableDragStartListener(
+                                  index: index,
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(8.0),
+                                    child: Icon(
+                                      Icons.drag_indicator_rounded,
+                                      color: scheme.onSurfaceVariant,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
                       const Divider(indent: 16, endIndent: 16),
                       SwitchListTile(
-                        title: const Text('Automatic Fallback'),
-                        subtitle: const Text(
-                          'Try other enabled providers automatically if primary finds no match',
+                        title: const Text('Cascade Fallback Across List'),
+                        subtitle: Text(
+                          'Active chain: ${settings.activeProvidersInOrder.map((p) => p.name).join(' → ')}',
                         ),
                         value: settings.useFallbackProvider,
                         onChanged: settings.setUseFallbackProvider,
                       ),
                       SwitchListTile(
-                        title: const Text('Prefer Local .lrc File First'),
+                        title: const Text('Prefer Local / Cached .lrc First'),
                         subtitle: const Text(
-                          'Check beside the audio file before querying online',
+                          'Load from device storage or internal streaming cache before querying online',
                         ),
                         value: settings.preferLocalLrcFirst,
                         onChanged: settings.setPreferLocalLrcFirst,
@@ -191,7 +271,7 @@ class SettingsScreen extends StatelessWidget {
               const SizedBox(height: 20),
 
               // --- PERMISSIONS & ABOUT SECTION ---
-              _SectionHeader(title: 'System & About'),
+              const _SectionHeader(title: 'System & About'),
               Card(
                 child: Column(
                   children: [
@@ -212,11 +292,57 @@ class SettingsScreen extends StatelessWidget {
                       ),
                     ),
                     const Divider(height: 1, indent: 16, endIndent: 16),
+                    ListTile(
+                      leading: const Icon(Icons.delete_sweep_outlined),
+                      title: const Text('Clear Internal Lyrics Cache'),
+                      subtitle: const Text(
+                        'Delete cached lyrics saved for Spotify, YouTube Music & Telegram',
+                      ),
+                      onTap: () async {
+                        final confirm = await showDialog<bool>(
+                          context: context,
+                          builder: (ctx) => AlertDialog(
+                            title: const Text('Clear Cached Lyrics?'),
+                            content: const Text(
+                              'This will delete all streaming lyrics stored in LRCSync\'s internal cache. Local .lrc files in your music folders will not be touched.',
+                            ),
+                            actions: [
+                              TextButton(
+                                onPressed: () => Navigator.pop(ctx, false),
+                                child: const Text('Cancel'),
+                              ),
+                              FilledButton(
+                                onPressed: () => Navigator.pop(ctx, true),
+                                child: const Text('Delete Cache'),
+                              ),
+                            ],
+                          ),
+                        );
+
+                        if (confirm == true && context.mounted) {
+                          final deleted = await nowPlayingController
+                              .clearInternalCache();
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                behavior: SnackBarBehavior.floating,
+                                content: Text(
+                                  deleted > 0
+                                      ? 'Deleted $deleted cached lyrics file${deleted == 1 ? '' : 's'}.'
+                                      : 'Internal lyrics cache is already empty.',
+                                ),
+                              ),
+                            );
+                          }
+                        }
+                      },
+                    ),
+                    const Divider(height: 1, indent: 16, endIndent: 16),
                     const ListTile(
                       leading: Icon(Icons.lyrics_rounded),
                       title: Text('LRCSync'),
                       subtitle: Text(
-                        'Version 1.0.0 • Real-time Android media session & local LRC synchronizer built with Flutter & Material You.',
+                        'Version 1.1.0 • Real-time Android media session & local/streaming LRC synchronizer built with Flutter & Material You.',
                       ),
                       isThreeLine: true,
                     ),
