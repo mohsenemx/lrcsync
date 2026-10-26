@@ -342,7 +342,7 @@ class SettingsScreen extends StatelessWidget {
                       leading: Icon(Icons.lyrics_rounded),
                       title: Text('LRCSync'),
                       subtitle: Text(
-                        'Version 1.1.0 • Real-time Android media session & local/streaming LRC synchronizer built with Flutter & Material You.',
+                        'Version 1.1.1 • Real-time Android media session & local/streaming LRC synchronizer built with Flutter & Material You.',
                       ),
                       isThreeLine: true,
                     ),

@@ -682,7 +682,7 @@ class _TrackLyricsModalSheetState extends State<_TrackLyricsModalSheet> {
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        '${widget.track.artist} •${widget.track.album}',
+                        '${widget.track.artist} • ${widget.track.album}',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: textTheme.bodySmall?.copyWith(

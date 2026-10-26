@@ -132,6 +132,7 @@ class _LiveLyricsScreenState extends State<LiveLyricsScreen>
     widget.controller.seekTo(target);
     setState(() {
       _livePosition = target;
+      _scrollToActiveLine(lineIndex);
       _activeLineIndex = lineIndex;
     });
   }

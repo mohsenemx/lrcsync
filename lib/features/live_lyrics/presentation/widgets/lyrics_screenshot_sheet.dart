@@ -40,6 +40,7 @@ class LyricsScreenshotSheet extends StatefulWidget {
 
 class _LyricsScreenshotSheetState extends State<LyricsScreenshotSheet> {
   final GlobalKey _cardBoundaryKey = GlobalKey();
+  late final List<GlobalKey> _lineKeys;
   late final Set<int> _selectedIndices;
   int _selectedPaletteIndex = 0;
   bool _isExporting = false;
@@ -65,6 +66,11 @@ class _LyricsScreenshotSheetState extends State<LyricsScreenshotSheet> {
       name: 'Obsidian Dark',
       gradientColors: [Color(0xFF1F1F1F), Color(0xFF090909)],
     ),
+    _CardPalette(
+      gradientColors: [Colors.white, Colors.white70],
+      textColor: Colors.black,
+      name: 'Flashbang',
+    ),
   ];
 
   @override
@@ -72,10 +78,15 @@ class _LyricsScreenshotSheetState extends State<LyricsScreenshotSheet> {
     super.initState();
     _selectedIndices = {};
     final total = widget.parsedLyrics.lines.length;
+    _lineKeys = List.generate(
+      total,
+      (_) => GlobalKey(),
+    ); // <-- 2. Initialize keys
+
+    final start = widget.initialActiveIndex >= 0
+        ? widget.initialActiveIndex
+        : 0;
     if (total > 0) {
-      final start = widget.initialActiveIndex >= 0
-          ? widget.initialActiveIndex
-          : 0;
       for (var i = start; i < (start + 3) && i < total; i++) {
         if (widget.parsedLyrics.lines[i].text.trim().isNotEmpty) {
           _selectedIndices.add(i);
@@ -84,6 +95,20 @@ class _LyricsScreenshotSheetState extends State<LyricsScreenshotSheet> {
       if (_selectedIndices.isEmpty) {
         _selectedIndices.add(0);
       }
+
+      // <-- 3. Auto-scroll to the currently playing line when sheet opens
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        final targetCtx = _lineKeys[start.clamp(0, total - 1)].currentContext;
+        if (targetCtx != null) {
+          Scrollable.ensureVisible(
+            targetCtx,
+            alignment: 0.15,
+            duration: const Duration(milliseconds: 350),
+            curve: Curves.easeOutCubic,
+          );
+        }
+      });
     }
   }
 
@@ -392,60 +417,73 @@ class _LyricsScreenshotSheetState extends State<LyricsScreenshotSheet> {
                     style: textTheme.titleSmall,
                   ),
                   const SizedBox(height: 8),
-                  ...List.generate(widget.parsedLyrics.lines.length, (index) {
-                    final line = widget.parsedLyrics.lines[index].text.trim();
-                    if (line.isEmpty) return const SizedBox.shrink();
-                    final isSelected = _selectedIndices.contains(index);
+                  SizedBox(
+                    height: 260,
+                    child: SingleChildScrollView(
+                      child: Column(
+                        children: List.generate(
+                          widget.parsedLyrics.lines.length,
+                          (index) {
+                            final line = widget.parsedLyrics.lines[index].text
+                                .trim();
+                            if (line.isEmpty)
+                              return SizedBox.shrink(key: _lineKeys[index]);
+                            final isSelected = _selectedIndices.contains(index);
 
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 6),
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(14),
-                        onTap: () => _toggleLine(index),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 14,
-                            vertical: 10,
-                          ),
-                          decoration: BoxDecoration(
-                            color: isSelected
-                                ? scheme.primaryContainer
-                                : scheme.surfaceContainerHighest.withValues(
-                                    alpha: 0.4,
+                            return Padding(
+                              key: _lineKeys[index], // <-- Attach key here
+                              padding: const EdgeInsets.only(bottom: 6),
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(14),
+                                onTap: () => _toggleLine(index),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 14,
+                                    vertical: 10,
                                   ),
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                          child: Row(
-                            children: [
-                              Icon(
-                                isSelected
-                                    ? Icons.check_circle_rounded
-                                    : Icons.radio_button_unchecked_rounded,
-                                size: 20,
-                                color: isSelected
-                                    ? scheme.onPrimaryContainer
-                                    : scheme.onSurfaceVariant,
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Text(
-                                  line,
-                                  style: textTheme.bodyMedium?.copyWith(
+                                  decoration: BoxDecoration(
                                     color: isSelected
-                                        ? scheme.onPrimaryContainer
-                                        : scheme.onSurface,
-                                    fontWeight: isSelected
-                                        ? FontWeight.bold
-                                        : FontWeight.normal,
+                                        ? scheme.primaryContainer
+                                        : scheme.surfaceContainerHighest
+                                              .withValues(alpha: 0.4),
+                                    borderRadius: BorderRadius.circular(14),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        isSelected
+                                            ? Icons.check_circle_rounded
+                                            : Icons
+                                                  .radio_button_unchecked_rounded,
+                                        size: 20,
+                                        color: isSelected
+                                            ? scheme.onPrimaryContainer
+                                            : scheme.onSurfaceVariant,
+                                      ),
+                                      const SizedBox(width: 12),
+                                      Expanded(
+                                        child: Text(
+                                          line,
+                                          style: textTheme.bodyMedium?.copyWith(
+                                            color: isSelected
+                                                ? scheme.onPrimaryContainer
+                                                : scheme.onSurface,
+                                            fontWeight: isSelected
+                                                ? FontWeight.bold
+                                                : FontWeight.normal,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ),
                               ),
-                            ],
-                          ),
+                            );
+                          },
                         ),
                       ),
-                    );
-                  }),
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -458,21 +496,47 @@ class _LyricsScreenshotSheetState extends State<LyricsScreenshotSheet> {
                   children: [
                     Expanded(
                       child: FilledButton.tonalIcon(
+                        style: FilledButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 12,
+                          ),
+                        ),
                         onPressed: _isExporting
                             ? null
                             : () => _captureAndExport(share: false),
-                        icon: const Icon(Icons.download_rounded),
-                        label: const Text('Save to Gallery'),
+                        icon: const Icon(Icons.download_rounded, size: 18),
+                        label: const FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Text(
+                            'Save to Gallery',
+                            maxLines: 1,
+                            softWrap: false,
+                          ),
+                        ),
                       ),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
                       child: FilledButton.icon(
+                        style: FilledButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 12,
+                          ),
+                        ),
                         onPressed: _isExporting
                             ? null
                             : () => _captureAndExport(share: true),
-                        icon: const Icon(Icons.share_rounded),
-                        label: const Text('Share Card'),
+                        icon: const Icon(Icons.share_rounded, size: 18),
+                        label: const FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Text(
+                            'Share Card',
+                            maxLines: 1,
+                            softWrap: false,
+                          ),
+                        ),
                       ),
                     ),
                   ],
