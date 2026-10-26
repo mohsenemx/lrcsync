@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../../core/settings/app_settings_controller.dart';
 import '../../../now_playing/presentation/controllers/now_playing_controller.dart';
 import '../../../now_playing/presentation/widgets/permissions_modal.dart';
+import '../../../../main.dart';
 
 class SettingsScreen extends StatelessWidget {
   final AppSettingsController settings;
@@ -338,11 +339,11 @@ class SettingsScreen extends StatelessWidget {
                       },
                     ),
                     const Divider(height: 1, indent: 16, endIndent: 16),
-                    const ListTile(
+                    ListTile(
                       leading: Icon(Icons.lyrics_rounded),
                       title: Text('LRCSync'),
                       subtitle: Text(
-                        'Version 1.1.1 • Real-time Android media session & local/streaming LRC synchronizer built with Flutter & Material You.',
+                        'Version v$appVersion • Real-time Android media session & local/streaming LRC synchronizer built with Flutter & Material You.',
                       ),
                       isThreeLine: true,
                     ),

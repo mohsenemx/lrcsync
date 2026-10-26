@@ -4,14 +4,15 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 
 import '../../../../core/settings/app_settings_controller.dart';
+import '../../../../main.dart';
 import '../models/lyrics_result.dart';
 import '../models/parsed_lyrics.dart';
 import '../models/track_info.dart';
 import 'native_media_service.dart';
 
 class LyricsService {
-  static const Map<String, String> _headers = {
-    'User-Agent': 'LRCSync/1.3.0 (https://github.com/lrcsync/app)',
+  final Map<String, String> _headers = {
+    'User-Agent': 'LRCSync/$appVersion (https://github.com/mohsenemx/lrcsync)',
     'Accept': 'application/json, text/plain, */*',
   };
 
@@ -398,9 +399,6 @@ class LyricsService {
     Map<String, dynamic> data,
     String sourceLabel,
   ) {
-    final providerTag = (data['source'] ?? data['provider'] ?? '')
-        .toString()
-        .trim();
     final effectiveLabel = sourceLabel;
 
     final synced = (data['syncedLyrics'] as String?)?.trim();
