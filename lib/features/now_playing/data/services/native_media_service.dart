@@ -66,6 +66,10 @@ class NativeMediaService {
         .toList();
   }
 
+  Future<void> openUrl(String url) async {
+    await _methodChannel.invokeMethod('openUrl', {'url': url});
+  }
+
   Future<Uint8List?> getAlbumArt({int? albumId, String? filePath}) async {
     final cacheKey = '${albumId ?? 0}_${filePath ?? ''}';
     if (_artCache.containsKey(cacheKey)) {

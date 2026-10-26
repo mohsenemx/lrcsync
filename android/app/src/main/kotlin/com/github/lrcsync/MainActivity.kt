@@ -173,6 +173,17 @@ class MainActivity : FlutterActivity() {
                     result.success(deletedCount)
                 }
 
+                "openUrl" -> {
+                    val url = call.argument<String>("url")
+                    if (!url.isNullOrBlank()) {
+                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        startActivity(intent)
+                    }
+                    result.success(true)
+                }
+
                 else -> result.notImplemented()
             }
         }

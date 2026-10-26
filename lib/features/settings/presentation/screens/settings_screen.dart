@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../../core/settings/app_settings_controller.dart';
 import '../../../now_playing/presentation/controllers/now_playing_controller.dart';
 import '../../../now_playing/presentation/widgets/permissions_modal.dart';
+import '../../../../core/services/update_service.dart';
 import '../../../../main.dart';
 
 class SettingsScreen extends StatelessWidget {
@@ -276,6 +277,18 @@ class SettingsScreen extends StatelessWidget {
               Card(
                 child: Column(
                   children: [
+                    ListTile(
+                      leading: const Icon(Icons.system_update_rounded),
+                      title: const Text('Check for Updates'),
+                      subtitle: const Text('github.com/mohsenemx/lrcsync'),
+                      trailing: const Icon(Icons.open_in_new_rounded, size: 18),
+                      onTap: () => UpdateService.checkAndShowModalIfNeeded(
+                        context,
+                        nowPlayingController.mediaService,
+                        isManualCheck: true,
+                      ),
+                    ),
+                    const Divider(height: 1, indent: 16, endIndent: 16),
                     ListTile(
                       leading: const Icon(Icons.security_rounded),
                       title: const Text('Permissions Status'),

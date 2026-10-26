@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'core/settings/app_settings_controller.dart';
+import 'core/services/update_service.dart';
 import 'core/widgets/floating_nav_bar.dart';
 import 'features/library/presentation/controllers/library_controller.dart';
 import 'features/library/presentation/screens/library_screen.dart';
@@ -48,6 +49,12 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
           PermissionsModal.showIfNeeded(context, widget.nowPlayingController);
         }
       });
+    }
+    if (mounted) {
+      UpdateService.checkAndShowModalIfNeeded(
+        context,
+        widget.nowPlayingController.mediaService,
+      );
     }
   }
 

@@ -8,6 +8,7 @@ import '../../../../core/widgets/album_art_view.dart';
 import '../../../now_playing/data/models/parsed_lyrics.dart';
 import '../../../now_playing/data/models/track_info.dart';
 import '../../../now_playing/presentation/controllers/now_playing_controller.dart';
+import '../../../../core/utils/rtl_helper.dart';
 import '../widgets/lyrics_screenshot_sheet.dart';
 
 class LiveLyricsScreen extends StatefulWidget {
@@ -370,11 +371,16 @@ class _LiveLyricsScreenState extends State<LiveLyricsScreen>
         padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 32),
         itemCount: parsed.lines.length,
         itemBuilder: (context, index) {
+          final lineText = parsed.lines[index].text;
+          final isRtl = RtlHelper.isRtl(lineText);
           return Padding(
             padding: const EdgeInsets.symmetric(vertical: 8),
             child: Text(
-              parsed.lines[index].text,
+              lineText,
+              textDirection: isRtl ? TextDirection.rtl : TextDirection.ltr,
+              textAlign: isRtl ? TextAlign.right : TextAlign.left,
               style: textTheme.titleLarge?.copyWith(
+                fontFamily: isRtl ? 'Vazirmatn' : null,
                 color: scheme.onSurface.withValues(alpha: 0.88),
                 height: 1.45,
                 fontWeight: FontWeight.w600,
@@ -400,6 +406,7 @@ class _LiveLyricsScreenState extends State<LiveLyricsScreen>
           final isActive = index == _activeLineIndex;
           final isPast = index < _activeLineIndex;
           final distance = (_activeLineIndex - index).abs();
+          final isRtl = RtlHelper.isRtl(line.text);
 
           return GestureDetector(
             key: _lineKeys[index],
@@ -407,10 +414,11 @@ class _LiveLyricsScreenState extends State<LiveLyricsScreen>
             onTap: () => _seekToPosition(line.startTime, index),
             child: Container(
               width: double.infinity,
+              alignment: isRtl ? Alignment.centerRight : Alignment.centerLeft,
               padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 4),
               child: AnimatedScale(
                 scale: isActive ? 1.03 : 0.94,
-                alignment: Alignment.centerLeft,
+                alignment: isRtl ? Alignment.centerRight : Alignment.centerLeft,
                 duration: const Duration(milliseconds: 350),
                 curve: Curves.easeOutBack,
                 child: AnimatedOpacity(
@@ -422,12 +430,18 @@ class _LiveLyricsScreenState extends State<LiveLyricsScreen>
                       ? _WordByWordActiveLine(
                           line: line,
                           livePosition: _livePosition,
+                          isRtl: isRtl,
                           onWordTap: (wordStart) =>
                               _seekToPosition(wordStart, index),
                         )
                       : Text(
                           line.text.isEmpty ? '•••' : line.text,
+                          textDirection: isRtl
+                              ? TextDirection.rtl
+                              : TextDirection.ltr,
+                          textAlign: isRtl ? TextAlign.right : TextAlign.left,
                           style: textTheme.headlineSmall?.copyWith(
+                            fontFamily: isRtl ? 'Vazirmatn' : null,
                             fontWeight: isActive
                                 ? FontWeight.w800
                                 : FontWeight.w600,
@@ -458,81 +472,59 @@ class _LiveLyricsScreenState extends State<LiveLyricsScreen>
 class _WordByWordActiveLine extends StatelessWidget {
   final LyricLine line;
   final Duration livePosition;
+  final bool isRtl;
   final ValueChanged<Duration>? onWordTap;
 
   const _WordByWordActiveLine({
     required this.line,
     required this.livePosition,
+    this.isRtl = false,
     this.onWordTap,
   });
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final baseStyle = Theme.of(context).textTheme.headlineSmall
-        ?.copyWith(fontWeight: FontWeight.w800, height: 1.35);
+    final baseStyle = Theme.of(context).textTheme.headlineSmall?.copyWith(
+      fontFamily: isRtl ? 'Vazirmatn' : null,
+      fontWeight: FontWeight.w800,
+      height: 1.35,
+    );
 
-    return Wrap(
-      spacing: 0,
-      runSpacing: 6,
-      children: line.words.map((word) {
-        final totalMs = (word.endTime - word.startTime).inMilliseconds.clamp(
-          1,
-          60000,
-        );
-        final elapsedMs = (livePosition - word.startTime).inMilliseconds;
-        final progress = (elapsedMs / totalMs).clamp(0.0, 1.0);
-        final isCurrentlySinging = progress > 0.0 && progress < 1.0;
+    return Directionality(
+      textDirection: isRtl ? TextDirection.rtl : TextDirection.ltr,
+      child: Wrap(
+        alignment: WrapAlignment.start,
+        spacing: 0,
+        runSpacing: 6,
+        children: line.words.map((word) {
+          final totalMs = (word.endTime - word.startTime).inMilliseconds.clamp(
+            1,
+            60000,
+          );
+          final elapsedMs = (livePosition - word.startTime).inMilliseconds;
+          final progress = (elapsedMs / totalMs).clamp(0.0, 1.0);
+          final isCurrentlySinging = progress > 0.0 && progress < 1.0;
+          final verticalOffset = isCurrentlySinging ? -3.0 : 0.0;
 
-        // Subtle upward float while a word is actively being sung
-        final verticalOffset = isCurrentlySinging ? -3.0 : 0.0;
-
-        return GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: onWordTap != null ? () => onWordTap!(word.startTime) : null,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 120),
-            transform: Matrix4.translationValues(0, verticalOffset, 0),
-            child: progress <= 0.0
-                ? Text(
-                    word.text.endsWith(' ') ? word.text : '${word.text} ',
-                    style: baseStyle?.copyWith(
-                      color: scheme.onSurface.withValues(alpha: 0.35),
-                    ),
-                  )
-                : progress >= 1.0
-                ? Text(
-                    word.text.endsWith(' ') ? word.text : '${word.text} ',
-                    style: baseStyle?.copyWith(
-                      color: scheme.primary,
-                      shadows: [
-                        Shadow(
-                          color: scheme.primary.withValues(alpha: 0.45),
-                          blurRadius: 16,
-                        ),
-                      ],
-                    ),
-                  )
-                : ShaderMask(
-                    blendMode: BlendMode.srcIn,
-                    shaderCallback: (bounds) {
-                      return LinearGradient(
-                        begin: Alignment.centerLeft,
-                        end: Alignment.centerRight,
-                        stops: [
-                          (progress - 0.03).clamp(0.0, 1.0),
-                          (progress + 0.03).clamp(0.0, 1.0),
-                        ],
-                        colors: [
-                          scheme.primary,
-                          scheme.onSurface.withValues(alpha: 0.35),
-                        ],
-                      ).createShader(bounds);
-                    },
-                    child: Text(
+          return GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: onWordTap != null ? () => onWordTap!(word.startTime) : null,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 120),
+              transform: Matrix4.translationValues(0, verticalOffset, 0),
+              child: progress <= 0.0
+                  ? Text(
                       word.text.endsWith(' ') ? word.text : '${word.text} ',
                       style: baseStyle?.copyWith(
-                        color: Colors.white,
+                        color: scheme.onSurface.withValues(alpha: 0.35),
+                      ),
+                    )
+                  : progress >= 1.0
+                  ? Text(
+                      word.text.endsWith(' ') ? word.text : '${word.text} ',
+                      style: baseStyle?.copyWith(
+                        color: scheme.primary,
                         shadows: [
                           Shadow(
                             color: scheme.primary.withValues(alpha: 0.45),
@@ -540,11 +532,45 @@ class _WordByWordActiveLine extends StatelessWidget {
                           ),
                         ],
                       ),
+                    )
+                  : ShaderMask(
+                      blendMode: BlendMode.srcIn,
+                      shaderCallback: (bounds) {
+                        return LinearGradient(
+                          // Sweep Right-to-Left for Persian/Arabic, Left-to-Right for Latin
+                          begin: isRtl
+                              ? Alignment.centerRight
+                              : Alignment.centerLeft,
+                          end: isRtl
+                              ? Alignment.centerLeft
+                              : Alignment.centerRight,
+                          stops: [
+                            (progress - 0.03).clamp(0.0, 1.0),
+                            (progress + 0.03).clamp(0.0, 1.0),
+                          ],
+                          colors: [
+                            scheme.primary,
+                            scheme.onSurface.withValues(alpha: 0.35),
+                          ],
+                        ).createShader(bounds);
+                      },
+                      child: Text(
+                        word.text.endsWith(' ') ? word.text : '${word.text} ',
+                        style: baseStyle?.copyWith(
+                          color: Colors.white,
+                          shadows: [
+                            Shadow(
+                              color: scheme.primary.withValues(alpha: 0.45),
+                              blurRadius: 16,
+                            ),
+                          ],
+                        ),
+                      ),
                     ),
-                  ),
-          ),
-        );
-      }).toList(),
+            ),
+          );
+        }).toList(),
+      ),
     );
   }
 }
