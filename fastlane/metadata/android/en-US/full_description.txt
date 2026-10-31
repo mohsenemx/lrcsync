@@ -1,0 +1,17 @@
+LRCSync fetches synchronized lyrics for the music
+currently playing on your Android device.
+
+Features:
+- Real-time music detection using Android MediaSession.
+- Word-by-word and line-by-line synchronized lyrics.
+- Local music library browser.
+- Automatic LRC file downloading.
+- Batch lyrics downloading.
+- Multiple configurable lyrics providers.
+- Lyrics card generator.
+- Material You interface and AMOLED dark mode.
+
+Supports LRCMux, LRCLIB, and LRC.red.
+
+Requires notification listener access to detect
+currently playing music.

@@ -75,8 +75,9 @@ class SettingsScreen extends StatelessWidget {
                 iconBgColor: scheme.surfaceContainerHighest,
                 iconColor: scheme.onSurfaceVariant,
                 title: 'About & Updates',
-                subtitle:
-                    'Version ${UpdateService.currentVersion}, GitHub releases & credits',
+                subtitle: UpdateService.isFdroidBuild
+                    ? 'Version ${UpdateService.currentVersion}, GitHub repo & credits'
+                    : 'Version ${UpdateService.currentVersion}, GitHub releases & credits',
                 onTap: () => _openSubpage(
                   context,
                   _AboutSubpage(nowPlayingController: nowPlayingController),
@@ -680,6 +681,20 @@ class _AboutSubpage extends StatelessWidget {
                     title: const Text('Updates'),
                     subtitle: const Text(
                       'Updates are provided through F-Droid.',
+                    ),
+                  ),
+                if (UpdateService.isFdroidBuild)
+                  const Divider(height: 1, indent: 16, endIndent: 16),
+                if (UpdateService.isFdroidBuild)
+                  ListTile(
+                    leading: const Icon(Icons.code_rounded),
+                    title: const Text('Github Repository'),
+                    subtitle: const Text(
+                      'https://github.com/mohsenemx/lrcsync',
+                    ),
+                    trailing: const Icon(Icons.open_in_new_rounded, size: 18),
+                    onTap: () => nowPlayingController.mediaService.openUrl(
+                      'https://github.com/mohsenemx/lrcsync',
                     ),
                   ),
               ],
