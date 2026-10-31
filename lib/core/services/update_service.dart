@@ -93,7 +93,7 @@ class UpdateService {
     NativeMediaService mediaService, {
     bool isManualCheck = false,
   }) async {
-    if (!isManualCheck && isFdroidBuild) return;
+    if (isFdroidBuild) return;
 
     final release = await checkForUpdate();
     if (!context.mounted) return;

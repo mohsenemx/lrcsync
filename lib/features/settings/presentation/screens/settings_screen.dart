@@ -648,29 +648,40 @@ class _AboutSubpage extends StatelessWidget {
                   isThreeLine: true,
                 ),
                 const Divider(height: 1, indent: 16, endIndent: 16),
-                ListTile(
-                  leading: const Icon(Icons.system_update_rounded),
-                  title: const Text('Check for Updates'),
-                  subtitle: const Text(
-                    'Query GitHub Releases for a newer version',
+                if (!UpdateService.isFdroidBuild)
+                  ListTile(
+                    leading: const Icon(Icons.system_update_rounded),
+                    title: const Text('Check for Updates'),
+                    subtitle: const Text(
+                      'Query GitHub Releases for a newer version',
+                    ),
+                    trailing: const Icon(Icons.chevron_right_rounded),
+                    onTap: () => UpdateService.checkAndShowModalIfNeeded(
+                      context,
+                      nowPlayingController.mediaService,
+                      isManualCheck: true,
+                    ),
                   ),
-                  trailing: const Icon(Icons.chevron_right_rounded),
-                  onTap: () => UpdateService.checkAndShowModalIfNeeded(
-                    context,
-                    nowPlayingController.mediaService,
-                    isManualCheck: true,
+                if (!UpdateService.isFdroidBuild)
+                  const Divider(height: 1, indent: 16, endIndent: 16),
+                if (!UpdateService.isFdroidBuild)
+                  ListTile(
+                    leading: const Icon(Icons.code_rounded),
+                    title: const Text('GitHub Repository'),
+                    subtitle: const Text('github.com/mohsenemx/lrcsync'),
+                    trailing: const Icon(Icons.open_in_new_rounded, size: 18),
+                    onTap: () => nowPlayingController.mediaService.openUrl(
+                      'https://github.com/mohsenemx/lrcsync',
+                    ),
                   ),
-                ),
-                const Divider(height: 1, indent: 16, endIndent: 16),
-                ListTile(
-                  leading: const Icon(Icons.code_rounded),
-                  title: const Text('GitHub Repository'),
-                  subtitle: const Text('github.com/mohsenemx/lrcsync'),
-                  trailing: const Icon(Icons.open_in_new_rounded, size: 18),
-                  onTap: () => nowPlayingController.mediaService.openUrl(
-                    'https://github.com/mohsenemx/lrcsync',
+                if (UpdateService.isFdroidBuild)
+                  ListTile(
+                    leading: const Icon(Icons.code_rounded),
+                    title: const Text('Updates'),
+                    subtitle: const Text(
+                      'Updates are provided through F-Droid.',
+                    ),
                   ),
-                ),
               ],
             ),
           ),

@@ -2,7 +2,7 @@ name: lrcsync
 description: "Fetch time and word synced lyrics for your currently playing music"
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
-publish_to: 'none' # Remove this line if you wish to publish to pub.dev
+publish_to: "none" # Remove this line if you wish to publish to pub.dev
 
 # The following defines the version and build number for your application.
 # A version number is three numbers separated by dots, like 1.2.43
@@ -20,6 +20,7 @@ version: 1.1.4+6
 
 environment:
   sdk: ^3.13.5
+  flutter: ^3.47.7
 
 # Dependencies specify other packages that your package needs in order to work.
 # To automatically upgrade your package dependencies to the latest versions
@@ -54,37 +55,36 @@ dev_dependencies:
 
 # The following section is specific to Flutter packages.
 flutter:
-
   # The following line ensures that the Material Icons font is
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
   fonts:
-      - family: Vazirmatn
-        fonts:
-          - asset: assets/fonts/Vazirmatn-Regular.ttf
-          - asset: assets/fonts/Vazirmatn-Bold.ttf
-            weight: 700
-      - family: Inter
-        fonts:
-          - asset: assets/fonts/Inter_24pt-Regular.ttf
-          - asset: assets/fonts/Inter_24pt-Bold.ttf
-            weight: 700
-      - family: Poppins
-        fonts:
-          - asset: assets/fonts/Poppins-Regular.ttf
-          - asset: assets/fonts/Poppins-Bold.ttf
-            weight: 700
-      - family: Ubuntu
-        fonts:
-          - asset: assets/fonts/Ubuntu-Regular.ttf
-          - asset: assets/fonts/Ubuntu-Bold.ttf
-            weight: 700
-      - family: JetBrainsMono
-        fonts:
-          - asset: assets/fonts/JetBrainsMono-Regular.ttf
-          - asset: assets/fonts/JetBrainsMono-Bold.ttf
-            weight: 700
+    - family: Vazirmatn
+      fonts:
+        - asset: assets/fonts/Vazirmatn-Regular.ttf
+        - asset: assets/fonts/Vazirmatn-Bold.ttf
+          weight: 700
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/Inter_24pt-Regular.ttf
+        - asset: assets/fonts/Inter_24pt-Bold.ttf
+          weight: 700
+    - family: Poppins
+      fonts:
+        - asset: assets/fonts/Poppins-Regular.ttf
+        - asset: assets/fonts/Poppins-Bold.ttf
+          weight: 700
+    - family: Ubuntu
+      fonts:
+        - asset: assets/fonts/Ubuntu-Regular.ttf
+        - asset: assets/fonts/Ubuntu-Bold.ttf
+          weight: 700
+    - family: JetBrainsMono
+      fonts:
+        - asset: assets/fonts/JetBrainsMono-Regular.ttf
+        - asset: assets/fonts/JetBrainsMono-Bold.ttf
+          weight: 700
   # To add assets to your application, add an assets section, like this:
   # assets:
   #   - images/a_dot_burr.jpeg

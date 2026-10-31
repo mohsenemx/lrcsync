@@ -35,7 +35,7 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: stable
-          flutter-version: "3.47.8"
+          flutter-version: 3.47.7
           cache: true
 
       # Only trusted branch pushes and manual runs get the release key.
