@@ -21,6 +21,7 @@ class LyricsService {
     required List<LyricsProvider> providersInOrder,
     required bool useFallback,
     required bool preferLocalFirst,
+    bool preferStandardLrc = false,
     NativeMediaService? mediaService,
     String? customTitle,
     String? customArtist,
@@ -74,7 +75,7 @@ class LyricsService {
 
     // 2. Cascade through providers in the user's configured priority order
     for (final provider in chain) {
-      final result = await _fetchFromProvider(
+      final rawResult = await _fetchFromProvider(
         title: effectiveTitle,
         artist: effectiveArtist,
         album: effectiveAlbum,
@@ -82,8 +83,8 @@ class LyricsService {
         provider: provider,
       );
 
-      if (result != null) {
-        // If this song has no local filePath (streaming/Telegram), auto-cache it internally
+      if (rawResult != null) {
+        final result = _normalizeResult(rawResult, preferStandardLrc);
         if (track.isStreamingOrExternal && mediaService != null) {
           await mediaService.saveLrcFile(
             targetPath: null,
@@ -135,7 +136,6 @@ class LyricsService {
     }
   }
 
-  /// --- LRCMUX IMPLEMENTATION (https://lrcmux.dev/docs) ---
   Future<LyricsResult?> _fetchFromLrcMux({
     required String title,
     required String artist,
@@ -303,6 +303,32 @@ class LyricsService {
       }
     }
     return 0;
+  }
+
+  static final RegExp _inlineWordTagRegex = RegExp(
+    r'<\d{1,3}:\d{2}(?:[.:]\d{1,3})?>\s*',
+  );
+
+  LyricsResult _normalizeResult(LyricsResult result, bool preferStandardLrc) {
+    if (!preferStandardLrc || result.syncType != LyricsSyncType.wordByWord) {
+      return result;
+    }
+    // Strip <mm:ss.xx> word tags and collapse extra spaces per line
+    final cleanedLines = result.content
+        .split(RegExp(r'\r?\n'))
+        .map((line) {
+          return line
+              .replaceAll(_inlineWordTagRegex, '')
+              .replaceAll(RegExp(r' {2,}'), ' ')
+              .trim();
+        })
+        .join('\n');
+
+    return LyricsResult(
+      content: cleanedLines,
+      syncType: ParsedLyrics.detectSyncType(cleanedLines),
+      sourceName: result.sourceName,
+    );
   }
 
   String _formatLrcTimestamp(int ms) {

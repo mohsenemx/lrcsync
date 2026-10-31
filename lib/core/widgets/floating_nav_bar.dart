@@ -16,7 +16,7 @@ class FloatingNavBar extends StatelessWidget {
 
     return SafeArea(
       child: Padding(
-        padding: const EdgeInsets.only(bottom: 16),
+        padding: const EdgeInsets.only(bottom: 4),
         child: Align(
           alignment: Alignment.bottomCenter,
           heightFactor: 1.0,
@@ -26,7 +26,7 @@ class FloatingNavBar extends StatelessWidget {
             color: scheme.surfaceContainerHigh,
             borderRadius: BorderRadius.circular(100),
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [

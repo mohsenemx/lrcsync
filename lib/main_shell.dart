@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
-import 'core/settings/app_settings_controller.dart';
 import 'core/services/update_service.dart';
+import 'core/settings/app_settings_controller.dart';
 import 'core/widgets/floating_nav_bar.dart';
 import 'features/library/presentation/controllers/library_controller.dart';
 import 'features/library/presentation/screens/library_screen.dart';
@@ -28,11 +28,13 @@ class MainShell extends StatefulWidget {
 }
 
 class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
+  late final PageController _pageController;
   int _selectedIndex = 0;
 
   @override
   void initState() {
     super.initState();
+    _pageController = PageController(initialPage: _selectedIndex);
     WidgetsBinding.instance.addObserver(this);
     _initAndShowPermissionsModal();
   }
@@ -44,12 +46,16 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     if (!widget.nowPlayingController.hasShownInitialModal &&
         !widget.nowPlayingController.hasAllPermissions) {
       widget.nowPlayingController.markInitialModalShown();
-      WidgetsBinding.instance.addPostFrameCallback((_) {
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
         if (mounted) {
-          PermissionsModal.showIfNeeded(context, widget.nowPlayingController);
+          await PermissionsModal.showIfNeeded(
+            context,
+            widget.nowPlayingController,
+          );
         }
       });
     }
+
     if (mounted) {
       UpdateService.checkAndShowModalIfNeeded(
         context,
@@ -60,6 +66,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    _pageController.dispose();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -72,14 +79,28 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     }
   }
 
+  void _onNavBarTapped(int index) {
+    setState(() => _selectedIndex = index);
+    _pageController.animateToPage(
+      index,
+      duration: const Duration(milliseconds: 280),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final safeIndex = _selectedIndex.clamp(0, 3);
 
     return Scaffold(
       extendBody: true,
-      body: IndexedStack(
-        index: safeIndex,
+      body: PageView(
+        controller: _pageController,
+        onPageChanged: (index) {
+          if (_selectedIndex != index) {
+            setState(() => _selectedIndex = index);
+          }
+        },
         children: [
           NowPlayingScreen(
             controller: widget.nowPlayingController,
@@ -102,7 +123,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       ),
       bottomNavigationBar: FloatingNavBar(
         currentIndex: safeIndex,
-        onTap: (index) => setState(() => _selectedIndex = index),
+        onTap: _onNavBarTapped,
       ),
     );
   }

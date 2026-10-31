@@ -128,6 +128,7 @@ class LibraryController extends ChangeNotifier {
         track: track,
         providersInOrder: settings.activeProvidersInOrder,
         useFallback: settings.useFallbackProvider,
+        preferStandardLrc: settings.preferStandardLrcOverElrc,
         preferLocalFirst: false,
         mediaService: mediaService,
       );

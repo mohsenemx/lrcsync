@@ -20,6 +20,8 @@ void main() async {
   final libraryController = LibraryController(mediaService);
   final settingsController = AppSettingsController();
 
+  await settingsController.loadSettings();
+
   runApp(
     LRCSyncApp(
       nowPlayingController: nowPlayingController,

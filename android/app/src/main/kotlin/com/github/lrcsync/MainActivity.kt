@@ -183,6 +183,18 @@ class MainActivity : FlutterActivity() {
                     }
                     result.success(true)
                 }
+                "loadSettings" -> {
+                                    val prefs = getSharedPreferences("lrcsync_settings", Context.MODE_PRIVATE)
+                                    result.success(prefs.getString("settings_json", null))
+                                }
+                                "saveSettings" -> {
+                                    val json = call.argument<String>("json") ?: "{}"
+                                    getSharedPreferences("lrcsync_settings", Context.MODE_PRIVATE)
+                                        .edit()
+                                        .putString("settings_json", json)
+                                        .apply()
+                                    result.success(true)
+                                }
 
                 else -> result.notImplemented()
             }

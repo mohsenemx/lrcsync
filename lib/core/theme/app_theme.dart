@@ -25,6 +25,7 @@ class AppTheme {
     return ThemeData(
       useMaterial3: true,
       colorScheme: scheme,
+      fontFamily: settings.appFont.fontFamily,
       fontFamilyFallback: const ['Vazirmatn'],
       scaffoldBackgroundColor: scheme.surface,
       cardTheme: CardThemeData(

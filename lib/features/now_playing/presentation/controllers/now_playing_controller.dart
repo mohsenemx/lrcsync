@@ -90,6 +90,7 @@ class NowPlayingController extends ChangeNotifier {
       providersInOrder: settings.activeProvidersInOrder,
       useFallback: settings.useFallbackProvider,
       preferLocalFirst: shouldCheckLocalFirst,
+      preferStandardLrc: settings.preferStandardLrcOverElrc,
       mediaService: mediaService,
       customTitle: customTitle,
       customArtist: customArtist,

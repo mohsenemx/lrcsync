@@ -586,8 +586,8 @@ class _TrackLyricsModalSheetState extends State<_TrackLyricsModalSheet> {
       track: widget.track,
       providersInOrder: widget.settings.activeProvidersInOrder,
       useFallback: widget.settings.useFallbackProvider,
-      preferLocalFirst:
-          false, // <-- Always query online API when button is pressed
+      preferLocalFirst: false,
+      preferStandardLrc: widget.settings.preferStandardLrcOverElrc,
       mediaService: widget.mediaService,
       customTitle: title,
       customArtist: artist,
