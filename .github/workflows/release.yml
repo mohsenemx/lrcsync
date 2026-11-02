@@ -59,8 +59,10 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Build signed split APKs
-        run: flutter build apk --release --split-per-abi
+      - name: Build signed split and universal APKs
+        run: |
+          flutter build apk --release --split-per-abi
+          flutter build apk --release
 
       - name: Prepare release APKs
         shell: bash
@@ -70,12 +72,15 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           mkdir -p release-apks
 
-          for APK in build/app/outputs/flutter-apk/*-release.apk; do
+          for APK in build/app/outputs/flutter-apk/app-*-release.apk; do
             ABI=$(basename "$APK" | sed -E \
               's/^app-(.*)-release\.apk$/\1/')
 
             cp "$APK" "release-apks/lrcsync-${VERSION}-${ABI}.apk"
           done
+
+          cp build/app/outputs/flutter-apk/app-release.apk \
+            "release-apks/lrcsync-${VERSION}-universal.apk"
 
           ls -lh release-apks/
 
