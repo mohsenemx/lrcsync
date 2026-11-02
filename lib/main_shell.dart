@@ -30,11 +30,12 @@ class MainShell extends StatefulWidget {
 class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   late final PageController _pageController;
   int _selectedIndex = 0;
+  bool _isAnimatingFromNavBar = false;
 
   @override
   void initState() {
     super.initState();
-    _pageController = PageController(initialPage: _selectedIndex);
+    _pageController = PageController(initialPage: 0);
     WidgetsBinding.instance.addObserver(this);
     _initAndShowPermissionsModal();
   }
@@ -80,12 +81,13 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   }
 
   void _onNavBarTapped(int index) {
-    setState(() => _selectedIndex = index);
-    _pageController.animateToPage(
-      index,
-      duration: const Duration(milliseconds: 280),
-      curve: Curves.easeOutCubic,
-    );
+    if (_selectedIndex == index) return;
+
+    setState(() {
+      _selectedIndex = index;
+    });
+
+    _pageController.jumpToPage(index);
   }
 
   @override
@@ -94,6 +96,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
 
     return Scaffold(
       extendBody: true,
+      extendBodyBehindAppBar: true,
       body: PageView(
         controller: _pageController,
         onPageChanged: (index) {

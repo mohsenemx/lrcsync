@@ -308,6 +308,23 @@ class _LyricsWorkspaceState extends State<LyricsWorkspace> {
               ),
             ],
           ),
+          const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.tonalIcon(
+              onPressed: widget.isSavingLyrics ? null : widget.onSaveLyrics,
+              icon: widget.isSavingLyrics
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2.5),
+                    )
+                  : const Icon(Icons.save_alt_rounded),
+              label: Text(
+                widget.isSavingLyrics ? 'Saving...' : 'Save .lrc to Storage',
+              ),
+            ),
+          ),
           const SizedBox(height: 12),
           Container(
             width: double.infinity,
@@ -325,23 +342,6 @@ class _LyricsWorkspaceState extends State<LyricsWorkspace> {
 
                   height: 1.5,
                 ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton.tonalIcon(
-              onPressed: widget.isSavingLyrics ? null : widget.onSaveLyrics,
-              icon: widget.isSavingLyrics
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2.5),
-                    )
-                  : const Icon(Icons.save_alt_rounded),
-              label: Text(
-                widget.isSavingLyrics ? 'Saving...' : 'Save .lrc to Storage',
               ),
             ),
           ),
