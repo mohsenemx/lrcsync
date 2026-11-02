@@ -30,7 +30,7 @@ class LyricsService {
     final isManualRetry =
         customTitle != null || customArtist != null || customAlbum != null;
 
-    // 1A. Check local .lrc beside audio file if track is on device storage
+    // A. Check local .lrc beside audio file if track is on device storage
     if (!isManualRetry && preferLocalFirst && track.expectedLrcPath != null) {
       final localFile = File(track.expectedLrcPath!);
       if (await localFile.exists()) {
@@ -45,7 +45,7 @@ class LyricsService {
       }
     }
 
-    // 1B. Check LRCSync internal cache (for Spotify, YT Music, Telegram, etc.)
+    // B. Check LRCSync internal cache (for Spotify, YT Music, Telegram, etc.)
     if (!isManualRetry && preferLocalFirst && mediaService != null) {
       final cached = await mediaService.readInternalLrc(
         title: track.title,
@@ -73,7 +73,6 @@ class LyricsService {
     final durationSec = isManualRetry ? 0 : track.duration.inSeconds;
     final chain = useFallback ? providersInOrder : [providersInOrder.first];
 
-    // 2. Cascade through providers in the user's configured priority order
     for (final provider in chain) {
       final rawResult = await _fetchFromProvider(
         title: effectiveTitle,
@@ -144,8 +143,6 @@ class LyricsService {
   }) async {
     final cleanArtist = artist == 'Unknown Artist' ? '' : artist;
 
-    // 1. Try LRCMux KPOE v2 compatibility endpoint (/compat/kpoe/v2/lyrics/get)
-    // This endpoint returns word-by-word (syllable) or line-synced JSON.
     try {
       final kpoeParams = <String, String>{
         'title': title,
@@ -169,7 +166,6 @@ class LyricsService {
       }
     } catch (_) {}
 
-    // 2. Try LRCMux LRCLIB compatibility endpoints (/compat/lrclib/api/get & /search)
     final lrclibCompatResult = await _fetchFromLrcLib(
       host: 'api.lrcmux.dev',
       basePath: '/compat/lrclib/api',
@@ -206,7 +202,6 @@ class LyricsService {
 
       const sourceLabel = 'LRCMux';
 
-      // A. Direct LRC / Enhanced LRC string fields
       for (final key in ['syncedLyrics', 'enhancedLyrics', 'elrc', 'lrc']) {
         final val = dataMap[key];
         if (val is String && val.trim().isNotEmpty) {
@@ -219,7 +214,6 @@ class LyricsService {
         }
       }
 
-      // B. KPOE v2 structured `lyrics` list (Line or Word/Syllable synced)
       final lyricsList =
           dataMap['lyrics'] ?? dataMap['lines'] ?? dataMap['subtitles'];
       if (lyricsList is List && lyricsList.isNotEmpty) {
@@ -237,7 +231,6 @@ class LyricsService {
         }
       }
 
-      // C. Plain lyrics string
       for (final key in ['plainLyrics', 'plain', 'text', 'lyrics']) {
         final val = dataMap[key];
         if (val is String && val.trim().isNotEmpty) {
@@ -347,7 +340,6 @@ class LyricsService {
     return '<$min:$sec.$cs>';
   }
 
-  /// --- LRCLIB & LRCMUX (/compat/lrclib/api) IMPLEMENTATION ---
   Future<LyricsResult?> _fetchFromLrcLib({
     required String host,
     required String basePath,
@@ -360,7 +352,6 @@ class LyricsService {
     try {
       final cleanArtist = artist == 'Unknown Artist' ? '' : artist;
 
-      // Attempt 1: /get ( works with track_name & artist_name; duration/album optional on LRCMux )
       if (cleanArtist.isNotEmpty) {
         final getParams = <String, String>{
           'track_name': title,
@@ -381,8 +372,7 @@ class LyricsService {
           if (parsed != null) return parsed;
         }
       }
-
-      // Attempt 2: /search fallback
+      // fallback
       final searchParams = <String, String>{
         'track_name': title,
         if (cleanArtist.isNotEmpty) 'artist_name': cleanArtist,

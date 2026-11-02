@@ -536,23 +536,7 @@ class _FloatingTrackIsland extends StatelessWidget {
                       fontFeatures: const [FontFeature.tabularFigures()],
                     ),
                   ),
-                  Text(
-                    [
-                      track.isPlaying ? 'LIVE' : 'PAUSED',
-                      if (syncType != null)
-                        syncType == LyricsSyncType.wordByWord
-                            ? 'WORD SYNC'
-                            : (syncType == LyricsSyncType.lineByLine
-                                  ? 'LINE SYNC'
-                                  : 'PLAIN'),
-                    ].join(' • '),
-                    style: textTheme.labelSmall?.copyWith(
-                      color: scheme.primary,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 0.6,
-                      fontSize: 10.5,
-                    ),
-                  ),
+
                   Text(
                     track.formattedDuration,
                     style: textTheme.labelSmall?.copyWith(

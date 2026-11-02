@@ -152,7 +152,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
               // Filter Search Bar
               Padding(
-                padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+                padding: const EdgeInsets.fromLTRB(16, 15, 16, 15),
                 child: SearchBar(
                   controller: _searchCtrl,
                   hintText: 'Filter songs, artists, or albums...',
@@ -215,7 +215,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                               ),
                             ),
                             subtitle: Text(
-                              '${track.artist} •${track.album}',
+                              '${track.artist} • ${track.album}',
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),
@@ -634,9 +634,7 @@ class _TrackLyricsModalSheetState extends State<_TrackLyricsModalSheet> {
       SnackBar(
         behavior: SnackBarBehavior.floating,
         content: Text(
-          res.success
-              ? 'Saved to ${res.path}'
-              : (res.error ?? 'Failed to save .lrc file.'),
+          res.success ? 'Saved' : (res.error ?? 'Failed to save .lrc file.'),
         ),
       ),
     );

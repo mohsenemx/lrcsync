@@ -148,7 +148,7 @@ class _LyricsWorkspaceState extends State<LyricsWorkspace> {
           const SizedBox(height: 12),
           Container(
             width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 15),
             decoration: BoxDecoration(
               color: scheme.errorContainer,
               borderRadius: BorderRadius.circular(14),
@@ -321,7 +321,8 @@ class _LyricsWorkspaceState extends State<LyricsWorkspace> {
               child: SelectableText(
                 widget.lyricsResult!.content,
                 style: textTheme.bodyMedium?.copyWith(
-                  fontFamily: 'monospace',
+                  fontFamily: 'JetBrainsMono',
+
                   height: 1.5,
                 ),
               ),
