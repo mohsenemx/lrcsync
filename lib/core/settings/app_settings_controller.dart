@@ -72,6 +72,7 @@ class AppSettingsController extends ChangeNotifier {
   bool _useFallbackProvider = true;
   bool _preferLocalLrcFirst = true;
   bool _preferStandardLrcOverElrc = false;
+  bool _blurInactiveLyrics = true;
 
   ThemeMode get themeMode => _themeMode;
   bool get useDynamicColor => _useDynamicColor;
@@ -94,6 +95,7 @@ class AppSettingsController extends ChangeNotifier {
   bool get preferLocalLrcFirst => _preferLocalLrcFirst;
   bool get preferStandardLrcOverElrc => _preferStandardLrcOverElrc;
 
+  bool get blurInactiveLyrics => _blurInactiveLyrics;
   bool isProviderEnabled(LyricsProvider provider) =>
       _enabledProviders.contains(provider);
 
@@ -189,7 +191,8 @@ class AppSettingsController extends ChangeNotifier {
       _preferStandardLrcOverElrc =
           (map['preferStandardLrcOverElrc'] as bool?) ??
           _preferStandardLrcOverElrc;
-
+      _blurInactiveLyrics =
+          (map['blurInactiveLyrics'] as bool?) ?? _blurInactiveLyrics;
       notifyListeners();
     } catch (_) {}
   }
@@ -208,11 +211,18 @@ class AppSettingsController extends ChangeNotifier {
         'useFallbackProvider': _useFallbackProvider,
         'preferLocalLrcFirst': _preferLocalLrcFirst,
         'preferStandardLrcOverElrc': _preferStandardLrcOverElrc,
+        'blurInactiveLyrics': _blurInactiveLyrics,
       };
       await _methodChannel.invokeMethod('saveSettings', {
         'json': jsonEncode(data),
       });
     } catch (_) {}
+  }
+
+  void setBlurInactiveLyrics(bool value) {
+    _blurInactiveLyrics = value;
+    notifyListeners();
+    _saveSettings();
   }
 
   void setAppFont(AppFont font) {

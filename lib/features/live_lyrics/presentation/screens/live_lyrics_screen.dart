@@ -1,4 +1,6 @@
-import 'dart:ui';
+import 'dart:math' as math;
+import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
@@ -14,11 +16,12 @@ import '../widgets/lyrics_screenshot_sheet.dart';
 class LiveLyricsScreen extends StatefulWidget {
   final NowPlayingController controller;
   final AppSettingsController settings;
-
+  final bool isActive;
   const LiveLyricsScreen({
     super.key,
     required this.controller,
     required this.settings,
+    required this.isActive,
   });
 
   @override
@@ -31,6 +34,7 @@ class _LiveLyricsScreenState extends State<LiveLyricsScreen>
   final ScrollController _scrollController = ScrollController();
 
   Duration _livePosition = Duration.zero;
+  Duration? _draggingPosition;
   int _activeLineIndex = -1;
   String? _lastAutoFetchedTrackKey;
   List<GlobalKey> _lineKeys = [];
@@ -91,7 +95,7 @@ class _LiveLyricsScreenState extends State<LiveLyricsScreen>
     final track = widget.controller.currentTrack;
     if (track == null || !mounted) return;
 
-    final newPos = track.estimatedLivePosition;
+    final newPos = _draggingPosition ?? track.estimatedLivePosition;
     final parsed = widget.controller.lyricsResult?.parsed;
 
     int newActiveIndex = -1;
@@ -111,19 +115,22 @@ class _LiveLyricsScreenState extends State<LiveLyricsScreen>
       _activeLineIndex = newActiveIndex;
     });
 
-    if (lineChanged && newActiveIndex >= 0) {
+    if (lineChanged && newActiveIndex >= 0 && _draggingPosition == null) {
       _scrollToActiveLine(newActiveIndex);
     }
   }
 
   void _scrollToActiveLine(int index) {
     if (index < 0 || index >= _lineKeys.length) return;
+    // Do not force focus/scroll if the user is currently browsing another tab (e.g. Library or Settings)
+    if (!mounted || !widget.isActive) return;
+
     final ctx = _lineKeys[index].currentContext;
     if (ctx != null) {
       Scrollable.ensureVisible(
         ctx,
         alignment: 0.34,
-        duration: const Duration(milliseconds: 480),
+        duration: const Duration(milliseconds: 550),
         curve: Curves.easeOutCubic,
       );
     }
@@ -136,6 +143,31 @@ class _LiveLyricsScreenState extends State<LiveLyricsScreen>
       _scrollToActiveLine(lineIndex);
       _activeLineIndex = lineIndex;
     });
+  }
+
+  void _seekFromProgressBar(Duration target) {
+    final parsed = widget.controller.lyricsResult?.parsed;
+    int targetLineIndex = -1;
+    if (parsed != null && parsed.syncType != LyricsSyncType.plain) {
+      for (var i = 0; i < parsed.lines.length; i++) {
+        if (target >= parsed.lines[i].startTime) {
+          targetLineIndex = i;
+        } else {
+          break;
+        }
+      }
+    }
+
+    widget.controller.seekTo(target);
+    setState(() {
+      _draggingPosition = null;
+      _livePosition = target;
+      _activeLineIndex = targetLineIndex;
+    });
+
+    if (targetLineIndex >= 0) {
+      _scrollToActiveLine(targetLineIndex);
+    }
   }
 
   void _ensureLineKeys(int count) {
@@ -193,6 +225,8 @@ class _LiveLyricsScreenState extends State<LiveLyricsScreen>
       _ensureLineKeys(parsed.lines.length);
     }
 
+    final displayedPosition = _draggingPosition ?? _livePosition;
+
     return ListenableBuilder(
       listenable: widget.settings,
       builder: (context, _) {
@@ -201,52 +235,34 @@ class _LiveLyricsScreenState extends State<LiveLyricsScreen>
           body: Stack(
             fit: StackFit.expand,
             children: [
-              // 1. Blurred Cover Art Ambient Backdrop
-              if (track.artBytes != null)
-                Opacity(
-                  opacity: Theme.of(context).brightness == Brightness.dark
-                      ? 0.28
-                      : 0.16,
-                  child: ImageFiltered(
-                    imageFilter: ImageFilter.blur(sigmaX: 55, sigmaY: 55),
-                    child: Image.memory(track.artBytes!, fit: BoxFit.cover),
-                  ),
-                ),
-
-              // 2. Gradient Scrim
-              DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      scheme.surface.withValues(alpha: 0.82),
-                      scheme.surface.withValues(alpha: 0.62),
-                      scheme.surface.withValues(alpha: 0.94),
-                    ],
-                  ),
-                ),
+              // 1. Animated Moving Color Blobs Extracted from Song Cover Art
+              _AnimatedCoverBlobsBackground(
+                artBytes: track.artBytes,
+                isPlaying: track.isPlaying,
               ),
 
-              // 3. Full-Screen Lyrics Viewport
+              // 2. Full-Screen Lyrics Viewport
               Positioned.fill(child: _buildLyricsBody(context, parsed)),
 
-              // 4. Combined Bottom Floating Island (Header + Controls + Progress)
+              // 3. Combined Bottom Floating Island (Header + Controls + Progress)
               SafeArea(
                 child: Align(
                   alignment: Alignment.bottomCenter,
                   child: Padding(
-                    // Clears the compact floating navbar at the bottom
                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                     child: _FloatingTrackIsland(
                       track: track,
                       controller: widget.controller,
-                      livePosition: _livePosition,
-                      formattedLivePosition: _formatDuration(_livePosition),
+                      livePosition: displayedPosition,
+                      formattedLivePosition: _formatDuration(displayedPosition),
                       syncType: parsed?.syncType,
                       onShareCard: parsed != null && parsed.lines.isNotEmpty
                           ? _openScreenshotSheet
                           : null,
+                      onScrubUpdate: (pos) {
+                        setState(() => _draggingPosition = pos);
+                      },
+                      onSeekSelected: _seekFromProgressBar,
                     ),
                   ),
                 ),
@@ -293,7 +309,7 @@ class _LiveLyricsScreenState extends State<LiveLyricsScreen>
       );
     }
 
-    // Plain Unsynced Mode (Full Screen with bottom clearance for the island)
+    // Plain Unsynced Mode
     if (parsed.syncType == LyricsSyncType.plain) {
       return ListView.builder(
         controller: _scrollController,
@@ -322,6 +338,8 @@ class _LiveLyricsScreenState extends State<LiveLyricsScreen>
     }
 
     // Synced Mode (Word-by-Word & Line-by-Line)
+    final blurEnabled = widget.settings.blurInactiveLyrics;
+
     return SingleChildScrollView(
       controller: _scrollController,
       physics: const BouncingScrollPhysics(),
@@ -329,7 +347,7 @@ class _LiveLyricsScreenState extends State<LiveLyricsScreen>
         24,
         topInset + MediaQuery.of(context).size.height * 0.14,
         24,
-        240, // Ensures bottom lines scroll cleanly above the floating island
+        240,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -339,6 +357,50 @@ class _LiveLyricsScreenState extends State<LiveLyricsScreen>
           final isPast = index < _activeLineIndex;
           final distance = (_activeLineIndex - index).abs();
           final isRtl = RtlHelper.isRtl(line.text);
+
+          // Depth-of-field blur for unfocused lines when enabled
+          final double blurSigma = (!blurEnabled || isActive)
+              ? 0.0
+              : (distance == 1 ? 1.8 : 3.2);
+
+          Widget lineContent = line.hasWords && isActive
+              ? _WordByWordActiveLine(
+                  line: line,
+                  livePosition: _livePosition,
+                  isRtl: isRtl,
+                  fontSize: widget.settings.lyricsFontSize,
+                  onWordTap: (wordStart) => _seekToPosition(wordStart, index),
+                )
+              : Text(
+                  line.text.isEmpty ? '•••' : line.text,
+                  textDirection: isRtl ? TextDirection.rtl : TextDirection.ltr,
+                  textAlign: isRtl ? TextAlign.right : TextAlign.left,
+                  style: textTheme.headlineSmall?.copyWith(
+                    fontFamily: isRtl ? 'Vazirmatn' : null,
+                    fontWeight: isActive ? FontWeight.w800 : FontWeight.w600,
+                    color: isActive ? scheme.primary : scheme.onSurface,
+                    height: 1.35,
+                    fontSize: widget.settings.lyricsFontSize,
+                    shadows: isActive
+                        ? [
+                            Shadow(
+                              color: scheme.primary.withValues(alpha: 0.35),
+                              blurRadius: 18,
+                            ),
+                          ]
+                        : null,
+                  ),
+                );
+
+          if (blurSigma > 0) {
+            lineContent = ImageFiltered(
+              imageFilter: ui.ImageFilter.blur(
+                sigmaX: blurSigma,
+                sigmaY: blurSigma,
+              ),
+              child: lineContent,
+            );
+          }
 
           return GestureDetector(
             key: _lineKeys[index],
@@ -357,42 +419,8 @@ class _LiveLyricsScreenState extends State<LiveLyricsScreen>
                   duration: const Duration(milliseconds: 320),
                   opacity: isActive
                       ? 1.0
-                      : (isPast ? 0.30 : (distance == 1 ? 0.55 : 0.35)),
-                  child: line.hasWords && isActive
-                      ? _WordByWordActiveLine(
-                          line: line,
-                          livePosition: _livePosition,
-                          isRtl: isRtl,
-                          fontSize: widget.settings.lyricsFontSize,
-                          onWordTap: (wordStart) =>
-                              _seekToPosition(wordStart, index),
-                        )
-                      : Text(
-                          line.text.isEmpty ? '•••' : line.text,
-                          textDirection: isRtl
-                              ? TextDirection.rtl
-                              : TextDirection.ltr,
-                          textAlign: isRtl ? TextAlign.right : TextAlign.left,
-                          style: textTheme.headlineSmall?.copyWith(
-                            fontFamily: isRtl ? 'Vazirmatn' : null,
-                            fontWeight: isActive
-                                ? FontWeight.w800
-                                : FontWeight.w600,
-                            color: isActive ? scheme.primary : scheme.onSurface,
-                            height: 1.35,
-                            fontSize: widget.settings.lyricsFontSize,
-                            shadows: isActive
-                                ? [
-                                    Shadow(
-                                      color: scheme.primary.withValues(
-                                        alpha: 0.35,
-                                      ),
-                                      blurRadius: 18,
-                                    ),
-                                  ]
-                                : null,
-                          ),
-                        ),
+                      : (isPast ? 0.32 : (distance == 1 ? 0.58 : 0.38)),
+                  child: lineContent,
                 ),
               ),
             ),
@@ -403,6 +431,229 @@ class _LiveLyricsScreenState extends State<LiveLyricsScreen>
   }
 }
 
+// ============================================================================
+// ANIMATED COVER ART COLOR BLOBS BACKGROUND
+// ============================================================================
+
+class _AnimatedCoverBlobsBackground extends StatefulWidget {
+  final Uint8List? artBytes;
+  final bool isPlaying;
+
+  const _AnimatedCoverBlobsBackground({
+    required this.artBytes,
+    required this.isPlaying,
+  });
+
+  @override
+  State<_AnimatedCoverBlobsBackground> createState() =>
+      _AnimatedCoverBlobsBackgroundState();
+}
+
+class _AnimatedCoverBlobsBackgroundState
+    extends State<_AnimatedCoverBlobsBackground>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+  List<Color> _palette = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 24),
+    )..repeat();
+    _extractPalette(widget.artBytes);
+  }
+
+  @override
+  void didUpdateWidget(covariant _AnimatedCoverBlobsBackground oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.artBytes != widget.artBytes) {
+      _extractPalette(widget.artBytes);
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> _extractPalette(Uint8List? bytes) async {
+    if (bytes == null || bytes.isEmpty) {
+      if (mounted) setState(() => _palette = []);
+      return;
+    }
+
+    try {
+      // Decode cover art to a tiny 6x6 grid to sample dominant colors rapidly
+      final codec = await ui.instantiateImageCodec(
+        bytes,
+        targetWidth: 6,
+        targetHeight: 6,
+      );
+      final frame = await codec.getNextFrame();
+      final byteData = await frame.image.toByteData(
+        format: ui.ImageByteFormat.rawRgba,
+      );
+      frame.image.dispose();
+
+      if (byteData == null) return;
+      final data = byteData.buffer.asUint8List();
+      final extracted = <Color>[];
+
+      // Sample 5 spread-out regions across the cover art
+      const sampleIndices = [0, 5, 14, 21, 30, 35];
+      for (final idx in sampleIndices) {
+        final offset = idx * 4;
+        if (offset + 3 < data.length) {
+          final r = data[offset];
+          final g = data[offset + 1];
+          final b = data[offset + 2];
+          final rawColor = Color.fromARGB(255, r, g, b);
+
+          // Boost saturation slightly so background blobs look vibrant
+          final hsl = HSLColor.fromColor(rawColor);
+          final vibrant = hsl
+              .withSaturation((hsl.saturation * 1.35).clamp(0.35, 0.95))
+              .withLightness(hsl.lightness.clamp(0.25, 0.68))
+              .toColor();
+          extracted.add(vibrant);
+        }
+      }
+
+      if (mounted && extracted.isNotEmpty) {
+        setState(() => _palette = extracted);
+      }
+    } catch (_) {}
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    final colors = _palette.length >= 4
+        ? _palette
+        : [
+            scheme.primary,
+            scheme.tertiary,
+            scheme.secondary,
+            scheme.primaryContainer,
+            scheme.tertiaryContainer,
+          ];
+
+    return RepaintBoundary(
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          ColoredBox(color: scheme.surface),
+          ImageFiltered(
+            imageFilter: ui.ImageFilter.blur(sigmaX: 65, sigmaY: 65),
+            child: AnimatedBuilder(
+              animation: _controller,
+              builder: (context, _) {
+                return CustomPaint(
+                  painter: _ColorBlobsPainter(
+                    progress: _controller.value,
+                    colors: colors,
+                    isDark: isDark,
+                  ),
+                );
+              },
+            ),
+          ),
+          // Soft contrast scrim so lyrics stay crisp and legible
+          DecoratedBox(
+            decoration: BoxDecoration(
+              color: scheme.surface.withValues(alpha: isDark ? 0.52 : 0.62),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ColorBlobsPainter extends CustomPainter {
+  final double progress;
+  final List<Color> colors;
+  final bool isDark;
+
+  const _ColorBlobsPainter({
+    required this.progress,
+    required this.colors,
+    required this.isDark,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final t = progress * 2 * math.pi;
+    final shortestSide = size.shortestSide;
+
+    // 5 organic drifting trajectories using harmonic sine/cosine waves
+    final blobs = [
+      Offset(
+        size.width * (0.25 + 0.28 * math.sin(t + 0.4)),
+        size.height * (0.22 + 0.20 * math.cos(t * 2 + 1.1)),
+      ),
+      Offset(
+        size.width * (0.75 + 0.25 * math.cos(t + 2.0)),
+        size.height * (0.30 + 0.25 * math.sin(t + 0.7)),
+      ),
+      Offset(
+        size.width * (0.30 + 0.30 * math.cos(t * 2 + 3.2)),
+        size.height * (0.68 + 0.22 * math.sin(t + 2.5)),
+      ),
+      Offset(
+        size.width * (0.72 + 0.24 * math.sin(t + 4.5)),
+        size.height * (0.75 + 0.20 * math.cos(t + 1.8)),
+      ),
+      Offset(
+        size.width * (0.50 + 0.32 * math.sin(t * 2 + 5.1)),
+        size.height * (0.48 + 0.28 * math.cos(t + 3.9)),
+      ),
+    ];
+
+    final radii = [
+      shortestSide * 0.68,
+      shortestSide * 0.62,
+      shortestSide * 0.72,
+      shortestSide * 0.60,
+      shortestSide * 0.58,
+    ];
+
+    final baseAlpha = isDark ? 0.68 : 0.55;
+
+    for (var i = 0; i < blobs.length; i++) {
+      final color = colors[i % colors.length];
+      final center = blobs[i];
+      final radius = radii[i];
+
+      final paint = Paint()
+        ..shader = ui.Gradient.radial(
+          center,
+          radius,
+          [
+            color.withValues(alpha: baseAlpha),
+            color.withValues(alpha: baseAlpha * 0.45),
+            color.withValues(alpha: 0.0),
+          ],
+          const [0.0, 0.55, 1.0],
+        );
+
+      canvas.drawCircle(center, radius, paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _ColorBlobsPainter oldDelegate) {
+    return oldDelegate.progress != progress ||
+        oldDelegate.colors != colors ||
+        oldDelegate.isDark != isDark;
+  }
+}
+
 class _FloatingTrackIsland extends StatelessWidget {
   final TrackInfo track;
   final NowPlayingController controller;
@@ -410,6 +661,8 @@ class _FloatingTrackIsland extends StatelessWidget {
   final String formattedLivePosition;
   final LyricsSyncType? syncType;
   final VoidCallback? onShareCard;
+  final ValueChanged<Duration> onScrubUpdate;
+  final ValueChanged<Duration> onSeekSelected;
 
   const _FloatingTrackIsland({
     required this.track,
@@ -418,6 +671,8 @@ class _FloatingTrackIsland extends StatelessWidget {
     required this.formattedLivePosition,
     required this.syncType,
     this.onShareCard,
+    required this.onScrubUpdate,
+    required this.onSeekSelected,
   });
 
   @override
@@ -425,10 +680,15 @@ class _FloatingTrackIsland extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
 
+    final maxMs = track.duration.inMilliseconds > 0
+        ? track.duration.inMilliseconds.toDouble()
+        : 1.0;
+    final currentMs = livePosition.inMilliseconds.toDouble().clamp(0.0, maxMs);
+
     return ClipRRect(
       borderRadius: BorderRadius.circular(28),
       child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+        filter: ui.ImageFilter.blur(sigmaX: 18, sigmaY: 18),
         child: Container(
           padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
           decoration: BoxDecoration(
@@ -511,21 +771,45 @@ class _FloatingTrackIsland extends StatelessWidget {
                   ),
                 ],
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 8),
 
-              // Bottom Section: Progress Bar + Timestamps & Sync Type
-              ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: LinearProgressIndicator(
-                  minHeight: 4.5,
-                  value: track.duration.inMilliseconds > 0
-                      ? (livePosition.inMilliseconds /
-                                track.duration.inMilliseconds)
-                            .clamp(0.0, 1.0)
-                      : 0.0,
+              // Material Design 3 Interactive Seek Bar (Tap & Slide)
+              SliderTheme(
+                data: SliderTheme.of(context).copyWith(
+                  trackHeight: 5.0,
+                  trackShape: const RoundedRectSliderTrackShape(),
+                  activeTrackColor: scheme.primary,
+                  inactiveTrackColor: scheme.surfaceContainerHighest,
+                  thumbColor: scheme.primary,
+                  thumbShape: const RoundSliderThumbShape(
+                    enabledThumbRadius: 6.5,
+                    pressedElevation: 4.0,
+                  ),
+                  overlayColor: scheme.primary.withValues(alpha: 0.16),
+                  overlayShape: const RoundSliderOverlayShape(
+                    overlayRadius: 12.0,
+                  ),
+                ),
+                child: SizedBox(
+                  height: 22,
+                  child: Slider(
+                    value: currentMs,
+                    min: 0.0,
+                    max: maxMs,
+                    allowedInteraction: SliderInteraction.tapAndSlide,
+                    onChanged: track.duration.inMilliseconds > 0
+                        ? (val) =>
+                              onScrubUpdate(Duration(milliseconds: val.round()))
+                        : null,
+                    onChangeEnd: track.duration.inMilliseconds > 0
+                        ? (val) => onSeekSelected(
+                            Duration(milliseconds: val.round()),
+                          )
+                        : null,
+                  ),
                 ),
               ),
-              const SizedBox(height: 5),
+              const SizedBox(height: 2),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -533,7 +817,7 @@ class _FloatingTrackIsland extends StatelessWidget {
                     formattedLivePosition,
                     style: textTheme.labelSmall?.copyWith(
                       color: scheme.onSurfaceVariant,
-                      fontFeatures: const [FontFeature.tabularFigures()],
+                      fontFeatures: const [ui.FontFeature.tabularFigures()],
                     ),
                   ),
 
@@ -541,7 +825,7 @@ class _FloatingTrackIsland extends StatelessWidget {
                     track.formattedDuration,
                     style: textTheme.labelSmall?.copyWith(
                       color: scheme.onSurfaceVariant,
-                      fontFeatures: const [FontFeature.tabularFigures()],
+                      fontFeatures: const [ui.FontFeature.tabularFigures()],
                     ),
                   ),
                 ],

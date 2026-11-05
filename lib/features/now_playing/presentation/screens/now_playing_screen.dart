@@ -26,13 +26,15 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
     if (!mounted) return;
 
     final message = result.success
-        ? (result.isInternal
-              ? 'Saved to LRCSync internal cache for ${track?.sourceAppName ?? 'Streaming App'}!'
-              : 'Saved automatically to ${result.path}')
+        ? (result.isInternal ? 'Saved to internal cache.' : 'Saved to disk.')
         : (result.error ?? 'Failed to save .lrc file.');
 
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(behavior: SnackBarBehavior.floating, content: Text(message)),
+      SnackBar(
+        behavior: SnackBarBehavior.floating,
+        content: Center(child: Text(message)),
+        duration: Duration(milliseconds: 300),
+      ),
     );
   }
 

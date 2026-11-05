@@ -31,6 +31,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   late final PageController _pageController;
   int _selectedIndex = 0;
   bool _isAnimatingFromNavBar = false;
+  int _navAnimationId = 0;
 
   @override
   void initState() {
@@ -80,14 +81,59 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     }
   }
 
-  void _onNavBarTapped(int index) {
+  Future<void> _onNavBarTapped(int index) async {
     if (_selectedIndex == index) return;
+
+    final previousIndex = _selectedIndex;
+    final currentAnimId = ++_navAnimationId;
 
     setState(() {
       _selectedIndex = index;
+      _isAnimatingFromNavBar = true;
     });
 
-    _pageController.jumpToPage(index);
+    // When jumping across multiple tabs (e.g. 0 -> 3), jump to the adjacent tab
+    // first so intermediate pages don't flash across the viewport.
+    if ((index - previousIndex).abs() > 1) {
+      final neighbor = index > previousIndex ? index - 1 : index + 1;
+      _pageController.jumpToPage(neighbor);
+    }
+
+    await _pageController.animateToPage(
+      index,
+      duration: const Duration(milliseconds: 380),
+      curve: Curves.easeOutCubic,
+    );
+
+    if (mounted && currentAnimId == _navAnimationId) {
+      _isAnimatingFromNavBar = false;
+    }
+  }
+
+  Widget _buildAnimatedPage(int index, Widget child) {
+    return AnimatedBuilder(
+      animation: _pageController,
+      builder: (context, pageChild) {
+        double pageOffset = 0.0;
+        if (_pageController.hasClients &&
+            _pageController.position.hasContentDimensions) {
+          pageOffset =
+              (_pageController.page ?? _selectedIndex.toDouble()) - index;
+        } else {
+          pageOffset = (_selectedIndex - index).toDouble();
+        }
+
+        final distance = pageOffset.abs().clamp(0.0, 1.0);
+        final scale = 1.0 - (distance * 0.07);
+        final opacity = 1.0 - (distance * 0.55);
+
+        return Opacity(
+          opacity: opacity,
+          child: Transform.scale(scale: scale, child: pageChild),
+        );
+      },
+      child: _KeepAlivePage(child: child),
+    );
   }
 
   @override
@@ -99,28 +145,42 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       extendBodyBehindAppBar: true,
       body: PageView(
         controller: _pageController,
+        physics: const BouncingScrollPhysics(),
         onPageChanged: (index) {
-          if (_selectedIndex != index) {
+          if (!_isAnimatingFromNavBar && _selectedIndex != index) {
             setState(() => _selectedIndex = index);
           }
         },
         children: [
-          NowPlayingScreen(
-            controller: widget.nowPlayingController,
-            settings: widget.settingsController,
+          _buildAnimatedPage(
+            0,
+            NowPlayingScreen(
+              controller: widget.nowPlayingController,
+              settings: widget.settingsController,
+            ),
           ),
-          LiveLyricsScreen(
-            controller: widget.nowPlayingController,
-            settings: widget.settingsController,
+          _buildAnimatedPage(
+            1,
+            LiveLyricsScreen(
+              controller: widget.nowPlayingController,
+              settings: widget.settingsController,
+              isActive: safeIndex == 1,
+            ),
           ),
-          LibraryScreen(
-            controller: widget.libraryController,
-            settings: widget.settingsController,
-            lyricsService: widget.nowPlayingController.lyricsService,
+          _buildAnimatedPage(
+            2,
+            LibraryScreen(
+              controller: widget.libraryController,
+              settings: widget.settingsController,
+              lyricsService: widget.nowPlayingController.lyricsService,
+            ),
           ),
-          SettingsScreen(
-            settings: widget.settingsController,
-            nowPlayingController: widget.nowPlayingController,
+          _buildAnimatedPage(
+            3,
+            SettingsScreen(
+              settings: widget.settingsController,
+              nowPlayingController: widget.nowPlayingController,
+            ),
           ),
         ],
       ),
@@ -129,5 +189,26 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
         onTap: _onNavBarTapped,
       ),
     );
+  }
+}
+
+class _KeepAlivePage extends StatefulWidget {
+  final Widget child;
+
+  const _KeepAlivePage({required this.child});
+
+  @override
+  State<_KeepAlivePage> createState() => _KeepAlivePageState();
+}
+
+class _KeepAlivePageState extends State<_KeepAlivePage>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    return widget.child;
   }
 }

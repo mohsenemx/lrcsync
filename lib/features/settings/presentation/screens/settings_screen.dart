@@ -258,6 +258,16 @@ class _CustomizationSubpage extends StatelessWidget {
                         value: settings.amoledDark,
                         onChanged: settings.setAmoledDark,
                       ),
+                      const SizedBox(height: 12),
+                      SwitchListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('Blur Unfocused Lyrics'),
+                        subtitle: const Text(
+                          'Apply a depth-of-field blur to inactive lines in Live Lyrics',
+                        ),
+                        value: settings.blurInactiveLyrics,
+                        onChanged: settings.setBlurInactiveLyrics,
+                      ),
                     ],
                   ),
                 ),
@@ -272,6 +282,7 @@ class _CustomizationSubpage extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text('App Font', style: textTheme.titleSmall),
+
                       const SizedBox(height: 10),
                       DropdownMenu<AppFont>(
                         initialSelection: settings.appFont,
@@ -281,6 +292,7 @@ class _CustomizationSubpage extends StatelessWidget {
                           fontFamily: settings.appFont.fontFamily,
                           fontWeight: FontWeight.w600,
                         ),
+
                         inputDecorationTheme: InputDecorationTheme(
                           filled: true,
                           fillColor: scheme.surface,
@@ -293,6 +305,11 @@ class _CustomizationSubpage extends StatelessWidget {
                             borderSide: BorderSide(
                               color: scheme.outlineVariant,
                             ),
+                          ),
+                          outlineBorder: BorderSide(
+                            strokeAlign: 10,
+                            width: 10,
+                            style: BorderStyle.solid,
                           ),
                           enabledBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(16),
@@ -318,6 +335,11 @@ class _CustomizationSubpage extends StatelessWidget {
                             ),
                           );
                         }).toList(),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        'Fallback font for Persian/Arabic is Vazirmatn.',
+                        style: textTheme.bodySmall,
                       ),
                       const SizedBox(height: 20),
                       Row(
@@ -643,9 +665,19 @@ class _AboutSubpage extends StatelessWidget {
                 ListTile(
                   leading: Icon(Icons.lyrics_rounded),
                   title: Text('LRCSync'),
-                  subtitle: Text(
-                    'Version ${UpdateService.currentVersion} • Real-time Android media session & local/streaming LRC synchronizer built with Flutter & Material You.',
+                  subtitle: Column(
+                    mainAxisAlignment: MainAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.max,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Version ${UpdateService.currentVersion} '),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Real-time Android media session & local/streaming LRC synchronizer built with Flutter & Material You.',
+                      ),
+                    ],
                   ),
+
                   isThreeLine: true,
                 ),
                 const Divider(height: 1, indent: 16, endIndent: 16),
