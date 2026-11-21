@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 
 import '../../../../core/settings/app_settings_controller.dart';
 import '../../data/models/lyrics_result.dart';
@@ -38,7 +39,8 @@ class NowPlayingController extends ChangeNotifier {
   bool get isFetchingLyrics => _isFetchingLyrics;
   String? get lyricsError => _lyricsError;
   bool get isSavingLyrics => _isSavingLyrics;
-
+  bool _hasOverlayPermission = false;
+  bool get hasOverlayPermission => _hasOverlayPermission;
   void markInitialModalShown() {
     _hasShownInitialModal = true;
   }
@@ -51,9 +53,10 @@ class NowPlayingController extends ChangeNotifier {
   Future<void> checkPermissions() async {
     _hasNotificationAccess = await mediaService.hasNotificationPermission();
     _hasAudioPermission = await mediaService.hasAudioPermission();
-
-    if (_hasNotificationAccess) {
-      await mediaService.refreshTrack();
+    try {
+      _hasOverlayPermission = await FlutterOverlayWindow.isPermissionGranted();
+    } catch (_) {
+      _hasOverlayPermission = false;
     }
     notifyListeners();
   }
@@ -65,6 +68,14 @@ class NowPlayingController extends ChangeNotifier {
 
   Future<void> requestNotificationAccess() async {
     await mediaService.openNotificationSettings();
+  }
+
+  Future<void> requestOverlayPermission() async {
+    try {
+      final granted = await FlutterOverlayWindow.requestPermission();
+      _hasOverlayPermission = granted ?? false;
+      notifyListeners();
+    } catch (_) {}
   }
 
   Future<void> fetchLyrics(
@@ -145,16 +156,6 @@ class NowPlayingController extends ChangeNotifier {
   }
 
   Future<void> togglePlayPause() async {
-    if (_currentTrack != null) {
-      final nowPlaying = !_currentTrack!.isPlaying;
-      final currentLiveMs = _currentTrack!.estimatedLivePosition.inMilliseconds;
-      _currentTrack = _currentTrack!.copyWith(
-        isPlaying: nowPlaying,
-        positionMs: currentLiveMs,
-        timestampEpochMs: DateTime.now().millisecondsSinceEpoch,
-      );
-      notifyListeners();
-    }
     await mediaService.togglePlayPause();
   }
 

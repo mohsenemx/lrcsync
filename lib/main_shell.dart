@@ -10,17 +10,19 @@ import 'features/now_playing/presentation/controllers/now_playing_controller.dar
 import 'features/now_playing/presentation/screens/now_playing_screen.dart';
 import 'features/now_playing/presentation/widgets/permissions_modal.dart';
 import 'features/settings/presentation/screens/settings_screen.dart';
+import 'features/live_lyrics/data/services/lyrics_overlay_bridge.dart';
 
 class MainShell extends StatefulWidget {
   final NowPlayingController nowPlayingController;
   final LibraryController libraryController;
   final AppSettingsController settingsController;
-
+  final LyricsOverlayBridge overlayBridge;
   const MainShell({
     super.key,
     required this.nowPlayingController,
     required this.libraryController,
     required this.settingsController,
+    required this.overlayBridge,
   });
 
   @override
@@ -164,6 +166,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
             LiveLyricsScreen(
               controller: widget.nowPlayingController,
               settings: widget.settingsController,
+              overlayBridge: widget.overlayBridge,
               isActive: safeIndex == 1,
             ),
           ),

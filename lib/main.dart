@@ -7,6 +7,8 @@ import 'core/theme/app_theme.dart';
 import 'features/library/presentation/controllers/library_controller.dart';
 import 'features/now_playing/data/services/native_media_service.dart';
 import 'features/now_playing/presentation/controllers/now_playing_controller.dart';
+import 'features/live_lyrics/data/services/lyrics_overlay_bridge.dart';
+import 'features/live_lyrics/presentation/widgets/lyrics_overlay_widget.dart';
 import 'main_shell.dart';
 
 late String appVersion;
@@ -21,26 +23,37 @@ void main() async {
   final settingsController = AppSettingsController();
 
   await settingsController.loadSettings();
-
+  final overlayBridge = LyricsOverlayBridge(
+    nowPlayingController: nowPlayingController,
+    settingsController: settingsController,
+  );
   runApp(
     LRCSyncApp(
       nowPlayingController: nowPlayingController,
       libraryController: libraryController,
       settingsController: settingsController,
+      overlayBridge: overlayBridge,
     ),
   );
+}
+
+@pragma('vm:entry-point')
+void overlayMain() {
+  WidgetsFlutterBinding.ensureInitialized();
+  runApp(const LyricsOverlayApp());
 }
 
 class LRCSyncApp extends StatelessWidget {
   final NowPlayingController nowPlayingController;
   final LibraryController libraryController;
   final AppSettingsController settingsController;
-
+  final LyricsOverlayBridge overlayBridge;
   const LRCSyncApp({
     super.key,
     required this.nowPlayingController,
     required this.libraryController,
     required this.settingsController,
+    required this.overlayBridge,
   });
 
   @override
@@ -68,6 +81,7 @@ class LRCSyncApp extends StatelessWidget {
                 nowPlayingController: nowPlayingController,
                 libraryController: libraryController,
                 settingsController: settingsController,
+                overlayBridge: overlayBridge,
               ),
             );
           },

@@ -11,17 +11,21 @@ import '../../../../core/widgets/album_art_view.dart';
 import '../../../now_playing/data/models/parsed_lyrics.dart';
 import '../../../now_playing/data/models/track_info.dart';
 import '../../../now_playing/presentation/controllers/now_playing_controller.dart';
+import '../../data/services/lyrics_overlay_bridge.dart';
 import '../widgets/lyrics_screenshot_sheet.dart';
 
 class LiveLyricsScreen extends StatefulWidget {
   final NowPlayingController controller;
   final AppSettingsController settings;
   final bool isActive;
+  final LyricsOverlayBridge overlayBridge;
+
   const LiveLyricsScreen({
     super.key,
     required this.controller,
     required this.settings,
     required this.isActive,
+    required this.overlayBridge,
   });
 
   @override
@@ -57,6 +61,22 @@ class _LiveLyricsScreenState extends State<LiveLyricsScreen>
         mediaService: widget.controller.mediaService,
       ),
     );
+  }
+
+  Future<void> _handleToggleOverlay() async {
+    final wasActive = widget.overlayBridge.isOverlayActive;
+    final isNowActive = await widget.overlayBridge.toggleOverlay();
+
+    if (!wasActive && !isNowActive && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          behavior: SnackBarBehavior.floating,
+          content: Text(
+            'Grant "Display over other apps" permission to use Floating Lyrics.',
+          ),
+        ),
+      );
+    }
   }
 
   @override
@@ -185,15 +205,19 @@ class _LiveLyricsScreenState extends State<LiveLyricsScreen>
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final textTheme = Theme.of(context).textTheme;
-    final track = widget.controller.currentTrack;
-    final lyricsResult = widget.controller.lyricsResult;
+    return ListenableBuilder(
+      listenable: Listenable.merge([
+        widget.settings,
+        widget.overlayBridge,
+        widget.controller,
+      ]),
+      builder: (context, _) {
+        final scheme = Theme.of(context).colorScheme;
+        final textTheme = Theme.of(context).textTheme;
+        final track = widget.controller.currentTrack;
+        final lyricsResult = widget.controller.lyricsResult;
 
-    if (track == null) {
-      return ListenableBuilder(
-        listenable: widget.settings,
-        builder: (context, _) {
+        if (track == null) {
           return Scaffold(
             extendBodyBehindAppBar: true,
             appBar: AppBar(title: const Text('Live Lyrics')),
@@ -216,20 +240,15 @@ class _LiveLyricsScreenState extends State<LiveLyricsScreen>
               ),
             ),
           );
-        },
-      );
-    }
+        }
 
-    final parsed = lyricsResult?.parsed;
-    if (parsed != null) {
-      _ensureLineKeys(parsed.lines.length);
-    }
+        final parsed = lyricsResult?.parsed;
+        if (parsed != null) {
+          _ensureLineKeys(parsed.lines.length);
+        }
 
-    final displayedPosition = _draggingPosition ?? _livePosition;
+        final displayedPosition = _draggingPosition ?? _livePosition;
 
-    return ListenableBuilder(
-      listenable: widget.settings,
-      builder: (context, _) {
         return Scaffold(
           extendBodyBehindAppBar: true,
           body: Stack(
@@ -256,6 +275,8 @@ class _LiveLyricsScreenState extends State<LiveLyricsScreen>
                       livePosition: displayedPosition,
                       formattedLivePosition: _formatDuration(displayedPosition),
                       syncType: parsed?.syncType,
+                      isOverlayActive: widget.overlayBridge.isOverlayActive,
+                      onToggleOverlay: _handleToggleOverlay,
                       onShareCard: parsed != null && parsed.lines.isNotEmpty
                           ? _openScreenshotSheet
                           : null,
@@ -660,6 +681,8 @@ class _FloatingTrackIsland extends StatelessWidget {
   final Duration livePosition;
   final String formattedLivePosition;
   final LyricsSyncType? syncType;
+  final bool isOverlayActive;
+  final VoidCallback onToggleOverlay;
   final VoidCallback? onShareCard;
   final ValueChanged<Duration> onScrubUpdate;
   final ValueChanged<Duration> onSeekSelected;
@@ -670,6 +693,8 @@ class _FloatingTrackIsland extends StatelessWidget {
     required this.livePosition,
     required this.formattedLivePosition,
     required this.syncType,
+    required this.isOverlayActive,
+    required this.onToggleOverlay,
     this.onShareCard,
     required this.onScrubUpdate,
     required this.onSeekSelected,
@@ -708,7 +733,7 @@ class _FloatingTrackIsland extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // Top Row: Cover Art + Title/Artist + Share Button + Play/Pause
+              // Top Row: Cover Art + Title/Artist + Overlay + Share + Play/Pause
               Row(
                 children: [
                   AlbumArtView(
@@ -742,6 +767,20 @@ class _FloatingTrackIsland extends StatelessWidget {
                         ),
                       ],
                     ),
+                  ),
+                  IconButton(
+                    visualDensity: VisualDensity.compact,
+                    icon: Icon(
+                      isOverlayActive
+                          ? Icons.picture_in_picture_rounded
+                          : Icons.picture_in_picture_alt_rounded,
+                      size: 20,
+                      color: isOverlayActive ? scheme.primary : null,
+                    ),
+                    tooltip: isOverlayActive
+                        ? 'Close Floating Lyrics'
+                        : 'Float Lyrics Over Apps',
+                    onPressed: onToggleOverlay,
                   ),
                   if (onShareCard != null)
                     IconButton(
@@ -820,7 +859,6 @@ class _FloatingTrackIsland extends StatelessWidget {
                       fontFeatures: const [ui.FontFeature.tabularFigures()],
                     ),
                   ),
-
                   Text(
                     track.formattedDuration,
                     style: textTheme.labelSmall?.copyWith(

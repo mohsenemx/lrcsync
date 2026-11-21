@@ -30,73 +30,87 @@ class PermissionsModal extends StatelessWidget {
     return ListenableBuilder(
       listenable: controller,
       builder: (context, _) {
-        return Padding(
-          padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  CircleAvatar(
-                    radius: 22,
-                    backgroundColor: scheme.primaryContainer,
-                    child: Icon(
-                      Icons.security_rounded,
-                      color: scheme.onPrimaryContainer,
+        final allGrantedIncludingOverlay =
+            controller.hasAllPermissions && controller.hasOverlayPermission;
+
+        return SingleChildScrollView(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    CircleAvatar(
+                      radius: 22,
+                      backgroundColor: scheme.primaryContainer,
+                      child: Icon(
+                        Icons.security_rounded,
+                        color: scheme.onPrimaryContainer,
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Permissions Setup',
-                          style: textTheme.titleLarge?.copyWith(
-                            fontWeight: FontWeight.bold,
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Permissions Setup',
+                            style: textTheme.titleLarge?.copyWith(
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
-                        ),
-                        Text(
-                          'Required for LRCSync to detect songs and locate files',
-                          style: textTheme.bodySmall?.copyWith(
-                            color: scheme.onSurfaceVariant,
+                          Text(
+                            'Required for LRCSync to detect songs, sync files, and float lyrics',
+                            style: textTheme.bodySmall?.copyWith(
+                              color: scheme.onSurfaceVariant,
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 24),
-              _PermissionStepTile(
-                icon: Icons.notifications_active_outlined,
-                title: 'Media Notification Access',
-                description: 'Reads the title, artist, album, and length from your active music player.',
-                isGranted: controller.hasNotificationAccess,
-                onAction: controller.requestNotificationAccess,
-              ),
-              const SizedBox(height: 12),
-              _PermissionStepTile(
-                icon: Icons.folder_open_rounded,
-                title: 'Local Audio Storage',
-                description: 'Matches the active song to its local file path so .lrc files can be synced.',
-                isGranted: controller.hasAudioPermission,
-                onAction: controller.requestAudioPermission,
-              ),
-              const SizedBox(height: 24),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  child: Text(
-                    controller.hasAllPermissions
-                        ? 'All Set — Continue'
-                        : 'Continue Anyway',
+                  ],
+                ),
+                const SizedBox(height: 24),
+                _PermissionStepTile(
+                  icon: Icons.notifications_active_outlined,
+                  title: 'Media Notification Access',
+                  description: 'Reads the title, artist, album, and playback time from your active music player.',
+                  isGranted: controller.hasNotificationAccess,
+                  onAction: controller.requestNotificationAccess,
+                ),
+                const SizedBox(height: 12),
+                _PermissionStepTile(
+                  icon: Icons.folder_open_rounded,
+                  title: 'Local Audio Storage',
+                  description: 'Matches the active song to its local file path so .lrc files can be saved beside it.',
+                  isGranted: controller.hasAudioPermission,
+                  onAction: controller.requestAudioPermission,
+                ),
+                const SizedBox(height: 12),
+                _PermissionStepTile(
+                  icon: Icons.picture_in_picture_alt_rounded,
+                  title: 'Display Over Other Apps',
+                  badge: 'Optional',
+                  description: 'Allows LRCSync to show a draggable floating lyrics window on top of other apps.',
+                  isGranted: controller.hasOverlayPermission,
+                  onAction: controller.requestOverlayPermission,
+                ),
+                const SizedBox(height: 24),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    child: Text(
+                      allGrantedIncludingOverlay || controller.hasAllPermissions
+                          ? 'All Set — Continue'
+                          : 'Continue Anyway',
+                    ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         );
       },
@@ -107,6 +121,7 @@ class PermissionsModal extends StatelessWidget {
 class _PermissionStepTile extends StatelessWidget {
   final IconData icon;
   final String title;
+  final String? badge;
   final String description;
   final bool isGranted;
   final VoidCallback onAction;
@@ -114,6 +129,7 @@ class _PermissionStepTile extends StatelessWidget {
   const _PermissionStepTile({
     required this.icon,
     required this.title,
+    this.badge,
     required this.description,
     required this.isGranted,
     required this.onAction,
@@ -122,6 +138,7 @@ class _PermissionStepTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -146,16 +163,45 @@ class _PermissionStepTile extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  title,
-                  style: Theme.of(context).textTheme.titleSmall
-                      ?.copyWith(fontWeight: FontWeight.bold),
+                Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        title,
+                        style: textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                    if (badge != null && !isGranted) ...[
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: scheme.secondaryContainer,
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          badge!,
+                          style: textTheme.labelSmall?.copyWith(
+                            color: scheme.onSecondaryContainer,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
                 const SizedBox(height: 4),
                 Text(
                   description,
-                  style: Theme.of(context).textTheme.bodySmall
-                      ?.copyWith(color: scheme.onSurfaceVariant),
+                  style: textTheme.bodySmall?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                  ),
                 ),
               ],
             ),
@@ -166,7 +212,7 @@ class _PermissionStepTile extends StatelessWidget {
           else
             Text(
               'Granted',
-              style: Theme.of(context).textTheme.labelMedium?.copyWith(
+              style: textTheme.labelMedium?.copyWith(
                 color: scheme.primary,
                 fontWeight: FontWeight.bold,
               ),

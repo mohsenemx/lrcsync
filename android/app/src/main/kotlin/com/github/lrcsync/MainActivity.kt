@@ -29,6 +29,12 @@ import io.flutter.plugin.common.MethodChannel
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.concurrent.Executors
+import androidx.core.content.FileProvider
+import java.security.MessageDigest
+import android.media.AudioManager
+import android.view.KeyEvent
+import android.os.Handler
+import android.os.Looper
 
 class MainActivity : FlutterActivity() {
     private val METHOD_CHANNEL = "lrcsync/media_methods"
@@ -36,7 +42,7 @@ class MainActivity : FlutterActivity() {
     private val AUDIO_PERM_CODE = 1001
 
     private val ioExecutor = Executors.newFixedThreadPool(4)
-
+    private val mainHandler = Handler(Looper.getMainLooper())
     private var mediaSessionManager: MediaSessionManager? = null
     private var activeController: MediaController? = null
     private var eventSink: EventChannel.EventSink? = null
@@ -145,20 +151,51 @@ class MainActivity : FlutterActivity() {
 
                 "seekTo" -> {
                     val positionMs = (call.argument<Number>("positionMs"))?.toLong() ?: 0L
-                    val controller = getActiveOrCurrentController()
+                    val controller = getFreshActiveController()
                     controller?.transportControls?.seekTo(positionMs)
+                    mainHandler.postDelayed({ sendSessionStateToFlutter() }, 180)
                     result.success(controller != null)
                 }
 
                 "togglePlayPause" -> {
-                    val controller = getActiveOrCurrentController()
-                    val state = controller?.playbackState?.state
-                    if (state == PlaybackState.STATE_PLAYING) {
-                        controller?.transportControls?.pause()
+                    val controller = getFreshActiveController()
+                    if (controller != null) {
+                        val state = controller.playbackState?.state
+                        val isCurrentlyPlaying =
+                            state == PlaybackState.STATE_PLAYING ||
+                                    state == PlaybackState.STATE_BUFFERING
+                        if (isCurrentlyPlaying) {
+                            controller.transportControls.pause()
+                        } else {
+                            controller.transportControls.play()
+                        }
+                        mainHandler.postDelayed({ sendSessionStateToFlutter() }, 180)
+                        result.success(true)
                     } else {
-                        controller?.transportControls?.play()
+                        val audioManager =
+                            getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                        val now = SystemClock.uptimeMillis()
+                        audioManager.dispatchMediaKeyEvent(
+                            KeyEvent(
+                                now,
+                                now,
+                                KeyEvent.ACTION_DOWN,
+                                KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
+                                0
+                            )
+                        )
+                        audioManager.dispatchMediaKeyEvent(
+                            KeyEvent(
+                                now,
+                                now,
+                                KeyEvent.ACTION_UP,
+                                KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
+                                0
+                            )
+                        )
+                        mainHandler.postDelayed({ sendSessionStateToFlutter() }, 250)
+                        result.success(true)
                     }
-                    result.success(controller != null)
                 }
 
                 "clearInternalLyricsCache" -> {
@@ -183,18 +220,42 @@ class MainActivity : FlutterActivity() {
                     }
                     result.success(true)
                 }
+
                 "loadSettings" -> {
-                                    val prefs = getSharedPreferences("lrcsync_settings", Context.MODE_PRIVATE)
-                                    result.success(prefs.getString("settings_json", null))
-                                }
-                                "saveSettings" -> {
-                                    val json = call.argument<String>("json") ?: "{}"
-                                    getSharedPreferences("lrcsync_settings", Context.MODE_PRIVATE)
-                                        .edit()
-                                        .putString("settings_json", json)
-                                        .apply()
-                                    result.success(true)
-                                }
+                    val prefs = getSharedPreferences("lrcsync_settings", Context.MODE_PRIVATE)
+                    result.success(prefs.getString("settings_json", null))
+                }
+
+                "saveSettings" -> {
+                    val json = call.argument<String>("json") ?: "{}"
+                    getSharedPreferences("lrcsync_settings", Context.MODE_PRIVATE)
+                        .edit()
+                        .putString("settings_json", json)
+                        .apply()
+                    result.success(true)
+                }
+
+                "getSupportedAbis" -> {
+                    result.success(Build.SUPPORTED_ABIS.toList())
+                }
+
+                "getUpdateCacheDir" -> {
+                    val dir = File(cacheDir, "updates")
+                    if (!dir.exists()) dir.mkdirs()
+                    result.success(dir.absolutePath)
+                }
+
+                "installApk" -> {
+                    val filePath = call.argument<String>("filePath")
+                    val expectedSha256 = call.argument<String>("expectedSha256")
+                    if (filePath.isNullOrBlank()) {
+                        result.success(mapOf("status" to "error", "error" to "Missing APK path"))
+                    } else {
+                        ioExecutor.execute {
+                            handleInstallApk(filePath, expectedSha256, result)
+                        }
+                    }
+                }
 
                 else -> result.notImplemented()
             }
@@ -238,6 +299,95 @@ class MainActivity : FlutterActivity() {
         return File(getInternalLyricsDir(), "${pkg}__${art}__${tit}.lrc")
     }
 
+    private fun handleInstallApk(
+        filePath: String,
+        expectedSha256: String?,
+        result: MethodChannel.Result
+    ) {
+        val apkFile = File(filePath)
+        if (!apkFile.exists() || !apkFile.isFile) {
+            runOnUiThread {
+                result.success(mapOf("status" to "error", "error" to "Downloaded APK file not found."))
+            }
+            return
+        }
+
+        // Verify SHA-256 integrity if GitHub provided a digest
+        if (!expectedSha256.isNullOrBlank()) {
+            try {
+                val actualHash = computeSha256(apkFile)
+                if (!actualHash.equals(expectedSha256.trim(), ignoreCase = true)) {
+                    apkFile.delete()
+                    runOnUiThread {
+                        result.success(
+                            mapOf(
+                                "status" to "error",
+                                "error" to "SHA-256 verification failed. The download may be corrupted."
+                            )
+                        )
+                    }
+                    return
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    result.success(mapOf("status" to "error", "error" to "Checksum error: ${e.message}"))
+                }
+                return
+            }
+        }
+
+        runOnUiThread {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !packageManager.canRequestPackageInstalls()) {
+                val settingsIntent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).apply {
+                    data = Uri.parse("package:$packageName")
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                startActivity(settingsIntent)
+                result.success(
+                    mapOf(
+                        "status" to "needs_permission",
+                        "error" to "Enable 'Allow from this source' for LRCSync, then tap Install again."
+                    )
+                )
+                return@runOnUiThread
+            }
+
+            try {
+                val uri = FileProvider.getUriForFile(
+                    this,
+                    "$packageName.lrcsync.fileprovider",
+                    apkFile
+                )
+                val installIntent = Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(uri, "application/vnd.android.package-archive")
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                startActivity(installIntent)
+                result.success(mapOf("status" to "launched"))
+            } catch (e: Exception) {
+                result.success(
+                    mapOf(
+                        "status" to "error",
+                        "error" to "Could not launch installer: ${e.message}"
+                    )
+                )
+            }
+        }
+    }
+
+    private fun computeSha256(file: File): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        file.inputStream().use { input ->
+            val buffer = ByteArray(8192)
+            var bytesRead: Int
+            while (input.read(buffer).also { bytesRead = it } != -1) {
+                digest.update(buffer, 0, bytesRead)
+            }
+        }
+        return digest.digest().joinToString("") { "%02x".format(it) }
+    }
+
     private fun getFallbackCacheFile(title: String, artist: String): File {
         val art = sanitizeKeyPart(artist)
         val tit = sanitizeKeyPart(title)
@@ -266,16 +416,34 @@ class MainActivity : FlutterActivity() {
         return null
     }
 
-    private fun getActiveOrCurrentController(): MediaController? {
-        if (activeController != null) return activeController
-        if (!isNotificationServiceEnabled()) return null
+    private fun getFreshActiveController(): MediaController? {
+        if (!isNotificationServiceEnabled()) return activeController
         return try {
             val componentName = ComponentName(this, MediaListenerService::class.java)
             val manager = getSystemService(Context.MEDIA_SESSION_SERVICE) as MediaSessionManager
-            activeController = manager.getActiveSessions(componentName).firstOrNull()
+            val sessions = manager.getActiveSessions(componentName)
+            if (sessions.isEmpty()) return activeController
+
+            val playing = sessions.firstOrNull {
+                val st = it.playbackState?.state
+                st == PlaybackState.STATE_PLAYING || st == PlaybackState.STATE_BUFFERING
+            }
+            val samePackage = activeController?.packageName?.let { pkg ->
+                sessions.firstOrNull { it.packageName == pkg }
+            }
+            val chosen = playing ?: samePackage ?: sessions.first()
+
+            if (activeController?.sessionToken != chosen.sessionToken) {
+                try {
+                    activeController?.unregisterCallback(controllerCallback)
+                } catch (_: Exception) {
+                }
+                activeController = chosen
+                activeController?.registerCallback(controllerCallback)
+            }
             activeController
         } catch (_: Exception) {
-            null
+            activeController
         }
     }
 

@@ -16,6 +16,16 @@ class SaveLrcResult {
   });
 }
 
+class InstallApkResult {
+  final String status; // 'launched', 'needs_permission', or 'error'
+  final String? error;
+
+  const InstallApkResult({required this.status, this.error});
+
+  bool get isLaunched => status == 'launched';
+  bool get needsPermission => status == 'needs_permission';
+}
+
 class NativeMediaService {
   static const _methodChannel = MethodChannel('lrcsync/media_methods');
   static const _eventChannel = EventChannel('lrcsync/media_events');
@@ -164,5 +174,33 @@ class NativeMediaService {
   Future<int> clearInternalLyricsCache() async {
     return await _methodChannel.invokeMethod<int>('clearInternalLyricsCache') ??
         0;
+  }
+
+  Future<List<String>> getSupportedAbis() async {
+    final list = await _methodChannel.invokeMethod<List<dynamic>>(
+      'getSupportedAbis',
+    );
+    return list?.whereType<String>().toList() ?? [];
+  }
+
+  Future<String?> getUpdateCacheDir() async {
+    return await _methodChannel.invokeMethod<String>('getUpdateCacheDir');
+  }
+
+  Future<InstallApkResult> installApk({
+    required String filePath,
+    String? expectedSha256,
+  }) async {
+    final res = await _methodChannel.invokeMethod('installApk', {
+      'filePath': filePath,
+      'expectedSha256': expectedSha256,
+    });
+    if (res == null) {
+      return const InstallApkResult(status: 'error', error: 'Unknown error');
+    }
+    return InstallApkResult(
+      status: (res['status'] as String?) ?? 'error',
+      error: res['error'] as String?,
+    );
   }
 }
