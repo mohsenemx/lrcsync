@@ -7,14 +7,37 @@ enum AppFont {
   system(label: 'System Default', fontFamily: null),
   ubuntu(label: 'Ubuntu', fontFamily: 'Ubuntu'),
   vazirmatn(label: 'Vazirmatn', fontFamily: 'Vazirmatn'),
-  jetBrainsMono(label: 'JetBrains Mono', fontFamily: 'JetBrainsMono'),
-  poppins(label: 'Poppins', fontFamily: 'Poppins'),
-  inter(label: 'Inter', fontFamily: 'Inter');
+  jetBrainsMono(label: 'JetBrains Mono', fontFamily: 'JetBrainsMono');
 
   final String label;
   final String? fontFamily;
 
   const AppFont({required this.label, required this.fontFamily});
+}
+
+enum OverlayShape {
+  rounded(label: 'Rounded', borderRadius: 24.0),
+  pill(label: 'Pill', borderRadius: 36.0),
+  softSquare(label: 'Soft', borderRadius: 12.0),
+  sharp(label: 'Sharp', borderRadius: 4.0);
+
+  final String label;
+  final double borderRadius;
+
+  const OverlayShape({required this.label, required this.borderRadius});
+}
+
+enum OverlayBackgroundStyle {
+  themeSurface(label: 'Theme'),
+  amoledBlack(label: 'Pure Black'),
+  frostedDark(label: 'Dark Glass'),
+  frostedLight(label: 'Light Glass'),
+  transparent(label: 'Transparent'),
+  customColor(label: 'Custom');
+
+  final String label;
+
+  const OverlayBackgroundStyle({required this.label});
 }
 
 enum LyricsProvider {
@@ -48,16 +71,31 @@ enum LyricsProvider {
 
 class AppSettingsController extends ChangeNotifier {
   static const _methodChannel = MethodChannel('lrcsync/media_methods');
+
   ThemeMode _themeMode = ThemeMode.system;
   bool _useDynamicColor = true;
   bool _amoledDark = false;
   Color _seedColor = const Color(0xFF6750A4);
 
-  // Font & Lyrics Typography
   AppFont _appFont = AppFont.system;
   double _lyricsFontSize = 24.0;
+  bool _blurInactiveLyrics = true;
 
-  // Providers & LRC Behavior
+  // Floating Overlay Customization
+  OverlayShape _overlayShape = OverlayShape.rounded;
+  OverlayBackgroundStyle _overlayBackgroundStyle =
+      OverlayBackgroundStyle.themeSurface;
+  Color _overlayCustomColor = const Color(0xFF1A1B26);
+  double _overlayOpacity = 0.92;
+  bool _overlayShowBorder = true;
+  bool _overlayFullWidth = true;
+  double _overlayWidthDp = 320.0;
+  double _overlayHeightDp = 240.0;
+  int _overlaySizeRevision = 0;
+
+  // Updates
+  String? _skippedUpdateVersion;
+
   final List<LyricsProvider> _providerPriority = [
     LyricsProvider.lrcmux,
     LyricsProvider.lrclib,
@@ -72,7 +110,6 @@ class AppSettingsController extends ChangeNotifier {
   bool _useFallbackProvider = true;
   bool _preferLocalLrcFirst = true;
   bool _preferStandardLrcOverElrc = false;
-  bool _blurInactiveLyrics = true;
 
   ThemeMode get themeMode => _themeMode;
   bool get useDynamicColor => _useDynamicColor;
@@ -81,6 +118,19 @@ class AppSettingsController extends ChangeNotifier {
 
   AppFont get appFont => _appFont;
   double get lyricsFontSize => _lyricsFontSize;
+  bool get blurInactiveLyrics => _blurInactiveLyrics;
+
+  OverlayShape get overlayShape => _overlayShape;
+  OverlayBackgroundStyle get overlayBackgroundStyle => _overlayBackgroundStyle;
+  Color get overlayCustomColor => _overlayCustomColor;
+  double get overlayOpacity => _overlayOpacity;
+  bool get overlayShowBorder => _overlayShowBorder;
+  bool get overlayFullWidth => _overlayFullWidth;
+  double get overlayWidthDp => _overlayWidthDp;
+  double get overlayHeightDp => _overlayHeightDp;
+  int get overlaySizeRevision => _overlaySizeRevision;
+
+  String? get skippedUpdateVersion => _skippedUpdateVersion;
 
   List<LyricsProvider> get providerPriority =>
       List.unmodifiable(_providerPriority);
@@ -95,7 +145,6 @@ class AppSettingsController extends ChangeNotifier {
   bool get preferLocalLrcFirst => _preferLocalLrcFirst;
   bool get preferStandardLrcOverElrc => _preferStandardLrcOverElrc;
 
-  bool get blurInactiveLyrics => _blurInactiveLyrics;
   bool isProviderEnabled(LyricsProvider provider) =>
       _enabledProviders.contains(provider);
 
@@ -108,7 +157,15 @@ class AppSettingsController extends ChangeNotifier {
     Color(0xFFE65100), // Amber Orange
   ];
 
-  /// Loads persisted settings from Android SharedPreferences
+  static const List<Color> availableOverlayColors = [
+    Color(0xFF1A1B26), // Midnight Navy
+    Color(0xFF1E1A2E), // Deep Violet
+    Color(0xFF102A24), // Deep Emerald
+    Color(0xFF2B161B), // Burgundy Dark
+    Color(0xFF1F2428), // Slate Charcoal
+    Color(0xFFF5F3FF), // Soft Lavender Light
+  ];
+
   Future<void> loadSettings() async {
     try {
       final rawJson = await _methodChannel.invokeMethod<String>('loadSettings');
@@ -128,9 +185,7 @@ class AppSettingsController extends ChangeNotifier {
       _amoledDark = (map['amoledDark'] as bool?) ?? _amoledDark;
 
       final seedInt = map['seedColor'] as int?;
-      if (seedInt != null) {
-        _seedColor = Color(seedInt);
-      }
+      if (seedInt != null) _seedColor = Color(seedInt);
 
       final fontName = map['appFont'] as String?;
       if (fontName != null) {
@@ -141,9 +196,46 @@ class AppSettingsController extends ChangeNotifier {
       }
 
       final fontSize = (map['lyricsFontSize'] as num?)?.toDouble();
-      if (fontSize != null) {
-        _lyricsFontSize = fontSize.clamp(16.0, 36.0);
+      if (fontSize != null) _lyricsFontSize = fontSize.clamp(16.0, 36.0);
+
+      _blurInactiveLyrics =
+          (map['blurInactiveLyrics'] as bool?) ?? _blurInactiveLyrics;
+
+      // Floating Overlay settings
+      final shapeName = map['overlayShape'] as String?;
+      if (shapeName != null) {
+        _overlayShape = OverlayShape.values.firstWhere(
+          (e) => e.name == shapeName,
+          orElse: () => OverlayShape.rounded,
+        );
       }
+
+      final bgStyleName = map['overlayBackgroundStyle'] as String?;
+      if (bgStyleName != null) {
+        _overlayBackgroundStyle = OverlayBackgroundStyle.values.firstWhere(
+          (e) => e.name == bgStyleName,
+          orElse: () => OverlayBackgroundStyle.themeSurface,
+        );
+      }
+
+      final overlayColorInt = map['overlayCustomColor'] as int?;
+      if (overlayColorInt != null) _overlayCustomColor = Color(overlayColorInt);
+
+      final opacity = (map['overlayOpacity'] as num?)?.toDouble();
+      if (opacity != null) _overlayOpacity = opacity.clamp(0.15, 1.0);
+
+      _overlayShowBorder =
+          (map['overlayShowBorder'] as bool?) ?? _overlayShowBorder;
+      _overlayFullWidth =
+          (map['overlayFullWidth'] as bool?) ?? _overlayFullWidth;
+
+      final widthDp = (map['overlayWidthDp'] as num?)?.toDouble();
+      if (widthDp != null) _overlayWidthDp = widthDp.clamp(220.0, 420.0);
+
+      final heightDp = (map['overlayHeightDp'] as num?)?.toDouble();
+      if (heightDp != null) _overlayHeightDp = heightDp.clamp(120.0, 400.0);
+
+      _skippedUpdateVersion = map['skippedUpdateVersion'] as String?;
 
       final priorityList = (map['providerPriority'] as List<dynamic>?)
           ?.whereType<String>()
@@ -191,8 +283,7 @@ class AppSettingsController extends ChangeNotifier {
       _preferStandardLrcOverElrc =
           (map['preferStandardLrcOverElrc'] as bool?) ??
           _preferStandardLrcOverElrc;
-      _blurInactiveLyrics =
-          (map['blurInactiveLyrics'] as bool?) ?? _blurInactiveLyrics;
+
       notifyListeners();
     } catch (_) {}
   }
@@ -206,23 +297,26 @@ class AppSettingsController extends ChangeNotifier {
         'seedColor': _seedColor.toARGB32(),
         'appFont': _appFont.name,
         'lyricsFontSize': _lyricsFontSize,
+        'blurInactiveLyrics': _blurInactiveLyrics,
+        'overlayShape': _overlayShape.name,
+        'overlayBackgroundStyle': _overlayBackgroundStyle.name,
+        'overlayCustomColor': _overlayCustomColor.toARGB32(),
+        'overlayOpacity': _overlayOpacity,
+        'overlayShowBorder': _overlayShowBorder,
+        'overlayFullWidth': _overlayFullWidth,
+        'overlayWidthDp': _overlayWidthDp,
+        'overlayHeightDp': _overlayHeightDp,
+        'skippedUpdateVersion': _skippedUpdateVersion,
         'providerPriority': _providerPriority.map((e) => e.name).toList(),
         'enabledProviders': _enabledProviders.map((e) => e.name).toList(),
         'useFallbackProvider': _useFallbackProvider,
         'preferLocalLrcFirst': _preferLocalLrcFirst,
         'preferStandardLrcOverElrc': _preferStandardLrcOverElrc,
-        'blurInactiveLyrics': _blurInactiveLyrics,
       };
       await _methodChannel.invokeMethod('saveSettings', {
         'json': jsonEncode(data),
       });
     } catch (_) {}
-  }
-
-  void setBlurInactiveLyrics(bool value) {
-    _blurInactiveLyrics = value;
-    notifyListeners();
-    _saveSettings();
   }
 
   void setAppFont(AppFont font) {
@@ -236,6 +330,103 @@ class AppSettingsController extends ChangeNotifier {
     notifyListeners();
     _saveSettings();
   }
+
+  void setBlurInactiveLyrics(bool value) {
+    _blurInactiveLyrics = value;
+    notifyListeners();
+    _saveSettings();
+  }
+
+  // --- Floating Overlay Setters ---
+
+  void setOverlayShape(OverlayShape shape) {
+    _overlayShape = shape;
+    notifyListeners();
+    _saveSettings();
+  }
+
+  void setOverlayBackgroundStyle(OverlayBackgroundStyle style) {
+    _overlayBackgroundStyle = style;
+    notifyListeners();
+    _saveSettings();
+  }
+
+  void setOverlayCustomColor(Color color) {
+    _overlayCustomColor = color;
+    notifyListeners();
+    _saveSettings();
+  }
+
+  void setOverlayOpacity(double value) {
+    _overlayOpacity = value.clamp(0.15, 1.0);
+    notifyListeners();
+    _saveSettings();
+  }
+
+  void setOverlayShowBorder(bool value) {
+    _overlayShowBorder = value;
+    notifyListeners();
+    _saveSettings();
+  }
+
+  void setOverlayFullWidth(bool value) {
+    _overlayFullWidth = value;
+    _overlaySizeRevision++;
+    notifyListeners();
+    _saveSettings();
+  }
+
+  void setOverlayWidthDp(double value) {
+    _overlayWidthDp = value.clamp(220.0, 420.0);
+    _overlaySizeRevision++;
+    notifyListeners();
+    _saveSettings();
+  }
+
+  void setOverlayHeightDp(double value) {
+    _overlayHeightDp = value.clamp(120.0, 400.0);
+    _overlaySizeRevision++;
+    notifyListeners();
+    _saveSettings();
+  }
+
+  /// Called when the user resizes the overlay directly on screen so the
+  /// settings persist without bouncing a duplicate resize command back.
+  void persistOverlaySizeFromWindow({
+    required bool fullWidth,
+    required double widthDp,
+    required double heightDp,
+  }) {
+    _overlayFullWidth = fullWidth;
+    _overlayWidthDp = widthDp.clamp(220.0, 420.0);
+    _overlayHeightDp = heightDp.clamp(120.0, 400.0);
+    notifyListeners();
+    _saveSettings();
+  }
+
+  void resetOverlayDefaults() {
+    _overlayShape = OverlayShape.rounded;
+    _overlayBackgroundStyle = OverlayBackgroundStyle.themeSurface;
+    _overlayCustomColor = const Color(0xFF1A1B26);
+    _overlayOpacity = 0.92;
+    _overlayShowBorder = true;
+    _overlayFullWidth = true;
+    _overlayWidthDp = 320.0;
+    _overlayHeightDp = 240.0;
+    _overlaySizeRevision++;
+    notifyListeners();
+    _saveSettings();
+  }
+
+  // --- Update Preference ---
+
+  void setSkippedUpdateVersion(String? version) {
+    _skippedUpdateVersion = version;
+    notifyListeners();
+    _saveSettings();
+  }
+
+  // --- Provider & Theme Setters ---
 
   void setPreferStandardLrcOverElrc(bool value) {
     _preferStandardLrcOverElrc = value;

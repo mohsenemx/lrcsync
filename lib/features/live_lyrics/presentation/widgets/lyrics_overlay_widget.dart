@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:ui' as ui;
 import 'dart:isolate';
+import 'dart:ui' as ui;
 
 import 'package:dynamic_color/dynamic_color.dart';
 import 'package:flutter/material.dart';
@@ -26,7 +26,8 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
   StreamSubscription<dynamic>? _sub;
   ReceivePort? _stateReceivePort;
   StreamSubscription<dynamic>? _statePortSub;
-  // Synced Settings
+
+  // Synced Theme & Lyrics Settings
   ThemeMode _themeMode = ThemeMode.system;
   bool _useDynamicColor = true;
   bool _amoledDark = false;
@@ -34,6 +35,22 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
   AppFont _appFont = AppFont.system;
   double _lyricsFontSize = 24.0;
   bool _blurInactiveLyrics = true;
+
+  // Synced Overlay Customization
+  OverlayShape _overlayShape = OverlayShape.rounded;
+  OverlayBackgroundStyle _overlayBackgroundStyle =
+      OverlayBackgroundStyle.themeSurface;
+  Color _overlayCustomColor = const Color(0xFF1A1B26);
+  double _overlayOpacity = 0.92;
+  bool _overlayShowBorder = true;
+  bool _overlayFullWidth = true;
+  double _overlayWidthDp = 320.0;
+  double _overlayHeightDp = 240.0;
+  int _lastSizeRevision = -1;
+
+  // Resize Mode State
+  bool _isResizeMode = false;
+  DateTime _lastResizeCall = DateTime.fromMillisecondsSinceEpoch(0);
 
   // Synced Track & Lyrics State
   bool _isFetching = false;
@@ -50,14 +67,19 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
 
   Duration _livePosition = Duration.zero;
   int _activeLineIndex = -1;
-  int _slideDirection =
-      1; // 1 = moving forward (slide up), -1 = rewinding (slide down)
+  int _slideDirection = 1;
 
-  void _sendCommandToMain(String action) {
+  // Auto-close liveness check when current song ends
+  DateTime? _lastMainReplyAt;
+  DateTime? _endPingSentAt;
+  bool _isAutoClosing = false;
+
+  void _sendCommandToMain(String action, [Map<String, dynamic>? extra]) {
     final payload = jsonEncode({
       'type': 'cmd',
       'action': action,
       'reqId': DateTime.now().microsecondsSinceEpoch,
+      ...?extra,
     });
     final sendPort = ui.IsolateNameServer.lookupPortByName(
       kLrcSyncOverlayCmdPort,
@@ -66,16 +88,11 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
     FlutterOverlayWindow.shareData(payload);
   }
 
-  void _handlePlayPauseTap() {
-    _sendCommandToMain('toggle_play_pause');
-  }
-
   @override
   void initState() {
     super.initState();
     _ticker = createTicker(_onTick)..start();
 
-    // Register direct state port for Main -> Overlay updates
     ui.IsolateNameServer.removePortNameMapping(kLrcSyncOverlayStatePort);
     _stateReceivePort = ReceivePort();
     ui.IsolateNameServer.registerPortWithName(
@@ -83,8 +100,6 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
       kLrcSyncOverlayStatePort,
     );
     _statePortSub = _stateReceivePort!.listen(_onMessageReceived);
-
-    // Keep plugin listener as fallback
     _sub = FlutterOverlayWindow.overlayListener.listen(_onMessageReceived);
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -107,17 +122,90 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
     super.dispose();
   }
 
+  Future<void> _applyWindowResize({required bool enableDrag}) async {
+    final targetW = _overlayFullWidth
+        ? WindowSize.matchParent
+        : _overlayWidthDp.round();
+    final targetH = _overlayHeightDp.round();
+    try {
+      await FlutterOverlayWindow.resizeOverlay(targetW, targetH, enableDrag);
+    } catch (_) {}
+  }
+
+  Future<void> _toggleResizeMode() async {
+    final entering = !_isResizeMode;
+    setState(() => _isResizeMode = entering);
+
+    // Disable native window dragging while resizing so corner drags don't move the window
+    await _applyWindowResize(enableDrag: !entering);
+
+    if (!entering) {
+      _sendCommandToMain('save_overlay_size', {
+        'fullWidth': _overlayFullWidth,
+        'widthDp': _overlayWidthDp,
+        'heightDp': _overlayHeightDp,
+      });
+    }
+  }
+
+  void _handleCornerDrag(DragUpdateDetails details, double currentWidthDp) {
+    final nextWidth =
+        ((_overlayFullWidth ? currentWidthDp : _overlayWidthDp) +
+                details.delta.dx)
+            .clamp(220.0, 420.0);
+    final nextHeight = (_overlayHeightDp + details.delta.dy).clamp(
+      120.0,
+      400.0,
+    );
+
+    setState(() {
+      if (details.delta.dx.abs() > 1.2) {
+        _overlayFullWidth = false;
+      }
+      _overlayWidthDp = nextWidth;
+      _overlayHeightDp = nextHeight;
+    });
+
+    final now = DateTime.now();
+    if (now.difference(_lastResizeCall).inMilliseconds >= 50) {
+      _lastResizeCall = now;
+      _applyWindowResize(enableDrag: false);
+    }
+  }
+
+  void _nudgeHeight(double deltaDp) {
+    setState(() {
+      _overlayHeightDp = (_overlayHeightDp + deltaDp).clamp(120.0, 400.0);
+    });
+    _applyWindowResize(enableDrag: !_isResizeMode);
+  }
+
+  void _toggleFullWidthInOverlay() {
+    setState(() => _overlayFullWidth = !_overlayFullWidth);
+    _applyWindowResize(enableDrag: !_isResizeMode);
+  }
+
   void _onMessageReceived(dynamic event) {
     if (event is! String || !mounted) return;
     try {
       final decoded = jsonDecode(event);
-      if (decoded is! Map<String, dynamic> || decoded['type'] != 'state') {
+      if (decoded is! Map<String, dynamic>) return;
+
+      if (decoded['type'] == 'pong') {
+        _lastMainReplyAt = DateTime.now();
         return;
       }
+
+      if (decoded['type'] != 'state') return;
+
+      _lastMainReplyAt = DateTime.now();
+      _endPingSentAt = null;
 
       final settingsMap = decoded['settings'] as Map<String, dynamic>?;
       final trackMap = decoded['track'] as Map<String, dynamic>?;
       final rawLrc = decoded['rawLrc'] as String?;
+
+      bool shouldResizeFromSettings = false;
 
       setState(() {
         _isFetching = (decoded['isFetching'] as bool?) ?? false;
@@ -150,6 +238,51 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
           _blurInactiveLyrics =
               (settingsMap['blurInactiveLyrics'] as bool?) ??
               _blurInactiveLyrics;
+
+          final shapeName = settingsMap['overlayShape'] as String?;
+          if (shapeName != null) {
+            _overlayShape = OverlayShape.values.firstWhere(
+              (e) => e.name == shapeName,
+              orElse: () => OverlayShape.rounded,
+            );
+          }
+
+          final bgStyleName = settingsMap['overlayBackgroundStyle'] as String?;
+          if (bgStyleName != null) {
+            _overlayBackgroundStyle = OverlayBackgroundStyle.values.firstWhere(
+              (e) => e.name == bgStyleName,
+              orElse: () => OverlayBackgroundStyle.themeSurface,
+            );
+          }
+
+          final customColorInt = settingsMap['overlayCustomColor'] as int?;
+          if (customColorInt != null) {
+            _overlayCustomColor = Color(customColorInt);
+          }
+
+          final opacity = (settingsMap['overlayOpacity'] as num?)?.toDouble();
+          if (opacity != null) _overlayOpacity = opacity.clamp(0.15, 1.0);
+
+          _overlayShowBorder =
+              (settingsMap['overlayShowBorder'] as bool?) ?? _overlayShowBorder;
+
+          final sizeRevision =
+              (settingsMap['overlaySizeRevision'] as num?)?.toInt() ?? 0;
+          if (!_isResizeMode) {
+            _overlayFullWidth =
+                (settingsMap['overlayFullWidth'] as bool?) ?? _overlayFullWidth;
+            _overlayWidthDp =
+                (settingsMap['overlayWidthDp'] as num?)?.toDouble() ??
+                _overlayWidthDp;
+            _overlayHeightDp =
+                (settingsMap['overlayHeightDp'] as num?)?.toDouble() ??
+                _overlayHeightDp;
+
+            if (_lastSizeRevision != -1 && sizeRevision != _lastSizeRevision) {
+              shouldResizeFromSettings = true;
+            }
+            _lastSizeRevision = sizeRevision;
+          }
         }
 
         if (trackMap != null) {
@@ -196,6 +329,10 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
           _activeLineIndex = idx;
         }
       });
+
+      if (shouldResizeFromSettings) {
+        _applyWindowResize(enableDrag: !_isResizeMode);
+      }
     } catch (_) {}
   }
 
@@ -211,6 +348,33 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
 
   void _onTick(Duration _) {
     if (!mounted || _title == null) return;
+
+    if (_isPlaying &&
+        _durationMs > 0 &&
+        _timestampEpochMs > 0 &&
+        !_isAutoClosing) {
+      final elapsed = DateTime.now().millisecondsSinceEpoch - _timestampEpochMs;
+      final unclampedMs = _positionMs + (elapsed * _playbackSpeed).round();
+
+      if (unclampedMs >= _durationMs) {
+        if (_endPingSentAt == null) {
+          _endPingSentAt = DateTime.now();
+          _sendCommandToMain('ping');
+        } else if (DateTime.now().difference(_endPingSentAt!).inMilliseconds >=
+            1500) {
+          final mainReplied =
+              _lastMainReplyAt != null &&
+              _lastMainReplyAt!.isAfter(_endPingSentAt!);
+          if (!mainReplied) {
+            _isAutoClosing = true;
+            FlutterOverlayWindow.closeOverlay();
+            return;
+          }
+        }
+      } else {
+        _endPingSentAt = null;
+      }
+    }
 
     final newPos = _estimateLivePosition();
     int newActiveIndex = -1;
@@ -233,6 +397,10 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
       _livePosition = newPos;
       _activeLineIndex = newActiveIndex;
     });
+  }
+
+  void _handlePlayPauseTap() {
+    _sendCommandToMain('toggle_play_pause');
   }
 
   ThemeData _buildOverlayTheme(
@@ -258,6 +426,45 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
     );
   }
 
+  Color _resolveCardBackground(ColorScheme scheme, bool isDark) {
+    switch (_overlayBackgroundStyle) {
+      case OverlayBackgroundStyle.themeSurface:
+        final base = (isDark && _amoledDark)
+            ? Colors.black
+            : scheme.surfaceContainerHigh;
+        return base.withValues(alpha: _overlayOpacity);
+      case OverlayBackgroundStyle.amoledBlack:
+        return Colors.black.withValues(alpha: _overlayOpacity);
+      case OverlayBackgroundStyle.frostedDark:
+        return const Color(0xFF14151A).withValues(alpha: _overlayOpacity);
+      case OverlayBackgroundStyle.frostedLight:
+        return const Color(0xFFF6F7FB).withValues(alpha: _overlayOpacity);
+      case OverlayBackgroundStyle.transparent:
+        return Colors.transparent;
+      case OverlayBackgroundStyle.customColor:
+        return _overlayCustomColor.withValues(alpha: _overlayOpacity);
+    }
+  }
+
+  Color _resolveSecondaryTextColor(ColorScheme scheme, bool isDark) {
+    switch (_overlayBackgroundStyle) {
+      case OverlayBackgroundStyle.amoledBlack:
+      case OverlayBackgroundStyle.frostedDark:
+        return Colors.white;
+      case OverlayBackgroundStyle.frostedLight:
+        return const Color(0xFF1A1C1E);
+      case OverlayBackgroundStyle.customColor:
+        return ThemeData.estimateBrightnessForColor(_overlayCustomColor) ==
+                Brightness.dark
+            ? Colors.white
+            : const Color(0xFF1A1C1E);
+      case OverlayBackgroundStyle.transparent:
+        return Colors.white;
+      case OverlayBackgroundStyle.themeSurface:
+        return scheme.onSurface;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return DynamicColorBuilder(
@@ -277,6 +484,12 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
     final scheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final isTransparent =
+        _overlayBackgroundStyle == OverlayBackgroundStyle.transparent;
+
+    final cardBg = _resolveCardBackground(scheme, isDark);
+    final fgBase = _resolveSecondaryTextColor(scheme, isDark);
+    final radius = _overlayShape.borderRadius;
 
     final double progress = _durationMs > 0
         ? (_livePosition.inMilliseconds / _durationMs).clamp(0.0, 1.0)
@@ -286,139 +499,247 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
 
     return Material(
       color: Colors.transparent,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(24),
-          child: Container(
-            decoration: BoxDecoration(
-              color:
-                  (isDark && _amoledDark
-                          ? Colors.black
-                          : scheme.surfaceContainerHigh)
-                      .withValues(alpha: 0.92),
-              borderRadius: BorderRadius.circular(24),
-              border: Border.all(
-                color: scheme.outlineVariant.withValues(alpha: 0.4),
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.28),
-                  blurRadius: 14,
-                  offset: const Offset(0, 4),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final showThreeLines = constraints.maxHeight >= 150;
+
+          return Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(radius),
+              child: Container(
+                decoration: BoxDecoration(
+                  color: _isResizeMode && isTransparent
+                      ? Colors.black.withValues(alpha: 0.45)
+                      : cardBg,
+                  borderRadius: BorderRadius.circular(radius),
+                  border: _isResizeMode
+                      ? Border.all(color: scheme.primary, width: 2.0)
+                      : (_overlayShowBorder && !isTransparent
+                            ? Border.all(color: fgBase.withValues(alpha: 0.16))
+                            : null),
+                  boxShadow: isTransparent
+                      ? null
+                      : [
+                          BoxShadow(
+                            color: Colors.black.withValues(
+                              alpha: 0.28 * _overlayOpacity,
+                            ),
+                            blurRadius: 14,
+                            offset: const Offset(0, 4),
+                          ),
+                        ],
                 ),
-              ],
-            ),
-            child: Column(
-              children: [
-                // Top Mini Controls Bar
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(14, 6, 8, 2),
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.drag_indicator_rounded,
-                        size: 16,
-                        color: scheme.onSurfaceVariant.withValues(alpha: 0.7),
-                      ),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: Text(
-                          _title != null
-                              ? '$_title • ${_artist ?? ''}'
-                              : 'LRCSync Overlay',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: textTheme.labelSmall?.copyWith(
-                            color: scheme.onSurfaceVariant,
-                            fontWeight: FontWeight.w700,
+                child: Stack(
+                  children: [
+                    Column(
+                      children: [
+                        // Top Mini Controls Bar
+                        Container(
+                          padding: const EdgeInsets.fromLTRB(12, 5, 6, 2),
+                          decoration: isTransparent
+                              ? BoxDecoration(
+                                  color: Colors.black.withValues(alpha: 0.32),
+                                )
+                              : null,
+                          child: Row(
+                            children: [
+                              Icon(
+                                _isResizeMode
+                                    ? Icons.aspect_ratio_rounded
+                                    : Icons.drag_indicator_rounded,
+                                size: 15,
+                                color: _isResizeMode
+                                    ? scheme.primary
+                                    : fgBase.withValues(alpha: 0.65),
+                              ),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: Text(
+                                  _isResizeMode
+                                      ? 'Drag corner to resize'
+                                      : (_title != null
+                                            ? '$_title • ${_artist ?? ''}'
+                                            : 'LRCSync Overlay'),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: textTheme.labelSmall?.copyWith(
+                                    color: fgBase.withValues(alpha: 0.78),
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                              IconButton(
+                                visualDensity: VisualDensity.compact,
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(
+                                  minWidth: 32,
+                                  minHeight: 32,
+                                ),
+                                icon: Icon(
+                                  _isResizeMode
+                                      ? Icons.check_rounded
+                                      : Icons.open_in_full_rounded,
+                                  size: 17,
+                                  color: _isResizeMode
+                                      ? scheme.primary
+                                      : fgBase.withValues(alpha: 0.78),
+                                ),
+                                onPressed: _toggleResizeMode,
+                              ),
+                              if (!_isResizeMode)
+                                IconButton(
+                                  visualDensity: VisualDensity.compact,
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints(
+                                    minWidth: 32,
+                                    minHeight: 32,
+                                  ),
+                                  icon: Icon(
+                                    _isPlaying
+                                        ? Icons.pause_rounded
+                                        : Icons.play_arrow_rounded,
+                                    size: 20,
+                                    color: scheme.primary,
+                                  ),
+                                  onPressed: _handlePlayPauseTap,
+                                ),
+                              IconButton(
+                                visualDensity: VisualDensity.compact,
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(
+                                  minWidth: 32,
+                                  minHeight: 32,
+                                ),
+                                icon: Icon(
+                                  Icons.close_rounded,
+                                  size: 18,
+                                  color: fgBase.withValues(alpha: 0.78),
+                                ),
+                                onPressed: () {
+                                  _sendCommandToMain('close');
+                                  FlutterOverlayWindow.closeOverlay();
+                                },
+                              ),
+                            ],
+                          ),
+                        ),
+
+                        // Animated Lyrics Area
+                        Expanded(
+                          child: ClipRect(
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 4,
+                              ),
+                              child: Center(
+                                child: _buildLyricsContent(
+                                  context,
+                                  scheme,
+                                  textTheme,
+                                  fgBase,
+                                  isTransparent,
+                                  scaledFontSize,
+                                  progress,
+                                  showThreeLines,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+
+                        // Quick Resize Controls Bar (shown only in Resize Mode)
+                        if (_isResizeMode)
+                          Container(
+                            padding: const EdgeInsets.fromLTRB(10, 2, 42, 4),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                _MiniResizeChip(
+                                  label: _overlayFullWidth
+                                      ? 'Full W'
+                                      : 'Custom W',
+                                  active: _overlayFullWidth,
+                                  onTap: _toggleFullWidthInOverlay,
+                                ),
+                                const SizedBox(width: 6),
+                                _MiniResizeChip(
+                                  label: 'H −',
+                                  onTap: () => _nudgeHeight(-24),
+                                ),
+                                const SizedBox(width: 6),
+                                _MiniResizeChip(
+                                  label: 'H +',
+                                  onTap: () => _nudgeHeight(24),
+                                ),
+                              ],
+                            ),
+                          ),
+
+                        // Bottom Live Progress Bar
+                        if (!isTransparent || _isResizeMode)
+                          LinearProgressIndicator(
+                            minHeight: 3,
+                            value: progress,
+                            backgroundColor: fgBase.withValues(alpha: 0.12),
+                          ),
+                      ],
+                    ),
+
+                    // Bottom-Right Corner Drag Handle (active in Resize Mode)
+                    if (_isResizeMode)
+                      Positioned(
+                        right: 0,
+                        bottom: 0,
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onPanUpdate: (details) =>
+                              _handleCornerDrag(details, constraints.maxWidth),
+                          onPanEnd: (_) =>
+                              _applyWindowResize(enableDrag: false),
+                          child: Container(
+                            width: 38,
+                            height: 38,
+                            alignment: Alignment.bottomRight,
+                            padding: const EdgeInsets.all(6),
+                            child: Container(
+                              width: 22,
+                              height: 22,
+                              decoration: BoxDecoration(
+                                color: scheme.primary,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Icon(
+                                Icons.south_east_rounded,
+                                size: 14,
+                                color: scheme.onPrimary,
+                              ),
+                            ),
                           ),
                         ),
                       ),
-                      IconButton(
-                        visualDensity: VisualDensity.compact,
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(
-                          minWidth: 34,
-                          minHeight: 34,
-                        ),
-                        icon: Icon(
-                          _isPlaying
-                              ? Icons.pause_rounded
-                              : Icons.play_arrow_rounded,
-                          size: 20,
-                          color: scheme.primary,
-                        ),
-                        onPressed: _handlePlayPauseTap,
-                      ),
-                      IconButton(
-                        visualDensity: VisualDensity.compact,
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(
-                          minWidth: 34,
-                          minHeight: 34,
-                        ),
-                        icon: Icon(
-                          Icons.close_rounded,
-                          size: 19,
-                          color: scheme.onSurfaceVariant,
-                        ),
-                        onPressed: () {
-                          _sendCommandToMain('close');
-                          FlutterOverlayWindow.closeOverlay();
-                        },
-                      ),
-                    ],
-                  ),
+                  ],
                 ),
-
-                // 3-Line Animated Lyrics Display Area
-                Expanded(
-                  child: ClipRect(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 4,
-                      ),
-                      child: Center(
-                        child: _buildLyricsContent(
-                          context,
-                          scheme,
-                          textTheme,
-                          scaledFontSize,
-                          progress,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-
-                // Bottom Live Progress Bar
-                LinearProgressIndicator(
-                  minHeight: 3,
-                  value: progress,
-                  backgroundColor: scheme.surfaceContainerHighest.withValues(
-                    alpha: 0.45,
-                  ),
-                ),
-              ],
+              ),
             ),
-          ),
-        ),
+          );
+        },
       ),
     );
   }
 
   Widget _buildSecondaryLine(
     String text,
-    ColorScheme scheme,
     TextTheme textTheme,
+    Color fgBase,
+    bool isTransparent,
     double fontSize,
     double opacity,
   ) {
     final trimmed = text.trim();
     if (trimmed.isEmpty) {
-      return SizedBox(height: fontSize * 1.1);
+      return SizedBox(height: fontSize * 1.0);
     }
 
     final isRtl = RtlHelper.isRtl(trimmed);
@@ -432,8 +753,17 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
         fontFamily: isRtl ? 'Vazirmatn' : null,
         fontSize: (fontSize * 0.68).clamp(11.0, 17.0),
         fontWeight: FontWeight.w600,
-        color: scheme.onSurface.withValues(alpha: opacity),
+        color: fgBase.withValues(alpha: opacity),
         height: 1.25,
+        shadows: isTransparent
+            ? const [
+                Shadow(
+                  color: Colors.black87,
+                  blurRadius: 8,
+                  offset: Offset(0, 1),
+                ),
+              ]
+            : null,
       ),
     );
 
@@ -451,13 +781,18 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
     BuildContext context,
     ColorScheme scheme,
     TextTheme textTheme,
+    Color fgBase,
+    bool isTransparent,
     double fontSize,
     double progress,
+    bool showThreeLines,
   ) {
     if (_title == null) {
       return Text(
         'Waiting for music...',
-        style: textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
+        style: textTheme.bodyMedium?.copyWith(
+          color: fgBase.withValues(alpha: 0.7),
+        ),
       );
     }
 
@@ -474,7 +809,9 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
       return Text(
         'No synced lyrics for this track',
         textAlign: TextAlign.center,
-        style: textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+        style: textTheme.bodySmall?.copyWith(
+          color: fgBase.withValues(alpha: 0.7),
+        ),
       );
     }
 
@@ -510,7 +847,7 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
         style: textTheme.titleLarge?.copyWith(
           fontSize: fontSize,
           fontWeight: FontWeight.w800,
-          color: scheme.primary.withValues(alpha: 0.75),
+          color: scheme.primary.withValues(alpha: 0.8),
         ),
       );
     } else if (currentLine.hasWords) {
@@ -519,6 +856,8 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
         livePosition: _livePosition,
         fontSize: fontSize,
         isRtl: isRtl,
+        inactiveColor: fgBase.withValues(alpha: 0.4),
+        isTransparent: isTransparent,
       );
     } else {
       activeWidget = Text(
@@ -535,8 +874,11 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
           height: 1.25,
           shadows: [
             Shadow(
-              color: scheme.primary.withValues(alpha: 0.35),
-              blurRadius: 12,
+              color: isTransparent
+                  ? Colors.black87
+                  : scheme.primary.withValues(alpha: 0.35),
+              blurRadius: isTransparent ? 10 : 12,
+              offset: isTransparent ? const Offset(0, 1.5) : Offset.zero,
             ),
           ],
         ),
@@ -592,27 +934,67 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
             mainAxisSize: MainAxisSize.min,
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              // Line 1: Previous Line
-              _buildSecondaryLine(
-                prevLine?.text ?? '',
-                scheme,
-                textTheme,
-                fontSize,
-                0.34,
-              ),
-              const SizedBox(height: 6),
-              // Line 2: Active Synced Line
+              if (showThreeLines) ...[
+                _buildSecondaryLine(
+                  prevLine?.text ?? '',
+                  textTheme,
+                  fgBase,
+                  isTransparent,
+                  fontSize,
+                  0.36,
+                ),
+                const SizedBox(height: 6),
+              ],
               activeWidget,
-              const SizedBox(height: 6),
-              // Line 3: Next Line
-              _buildSecondaryLine(
-                (isBeforeStart ? currentLine.text : nextLine?.text) ?? '',
-                scheme,
-                textTheme,
-                fontSize,
-                0.50,
-              ),
+              if (showThreeLines) ...[
+                const SizedBox(height: 6),
+                _buildSecondaryLine(
+                  (isBeforeStart ? currentLine.text : nextLine?.text) ?? '',
+                  textTheme,
+                  fgBase,
+                  isTransparent,
+                  fontSize,
+                  0.52,
+                ),
+              ],
             ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _MiniResizeChip extends StatelessWidget {
+  final String label;
+  final bool active;
+  final VoidCallback onTap;
+
+  const _MiniResizeChip({
+    required this.label,
+    this.active = false,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        decoration: BoxDecoration(
+          color: active
+              ? scheme.primaryContainer
+              : scheme.surfaceContainerHighest.withValues(alpha: 0.85),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Text(
+          label,
+          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+            fontSize: 10.5,
+            fontWeight: FontWeight.bold,
+            color: active ? scheme.onPrimaryContainer : scheme.onSurfaceVariant,
           ),
         ),
       ),
@@ -625,12 +1007,16 @@ class _OverlayWordByWordLine extends StatelessWidget {
   final Duration livePosition;
   final double fontSize;
   final bool isRtl;
+  final Color inactiveColor;
+  final bool isTransparent;
 
   const _OverlayWordByWordLine({
     required this.line,
     required this.livePosition,
     required this.fontSize,
     required this.isRtl,
+    required this.inactiveColor,
+    required this.isTransparent,
   });
 
   @override
@@ -642,6 +1028,16 @@ class _OverlayWordByWordLine extends StatelessWidget {
       fontWeight: FontWeight.w800,
       height: 1.25,
     );
+
+    final textShadows = [
+      Shadow(
+        color: isTransparent
+            ? Colors.black87
+            : scheme.primary.withValues(alpha: 0.45),
+        blurRadius: isTransparent ? 10 : 12,
+        offset: isTransparent ? const Offset(0, 1.5) : Offset.zero,
+      ),
+    ];
 
     return Directionality(
       textDirection: isRtl ? TextDirection.rtl : TextDirection.ltr,
@@ -671,7 +1067,16 @@ class _OverlayWordByWordLine extends StatelessWidget {
                 ? Text(
                     label,
                     style: baseStyle?.copyWith(
-                      color: scheme.onSurface.withValues(alpha: 0.35),
+                      color: inactiveColor,
+                      shadows: isTransparent
+                          ? const [
+                              Shadow(
+                                color: Colors.black87,
+                                blurRadius: 8,
+                                offset: Offset(0, 1),
+                              ),
+                            ]
+                          : null,
                     ),
                   )
                 : progress >= 1.0
@@ -679,12 +1084,7 @@ class _OverlayWordByWordLine extends StatelessWidget {
                     label,
                     style: baseStyle?.copyWith(
                       color: scheme.primary,
-                      shadows: [
-                        Shadow(
-                          color: scheme.primary.withValues(alpha: 0.45),
-                          blurRadius: 12,
-                        ),
-                      ],
+                      shadows: textShadows,
                     ),
                   )
                 : ShaderMask(
@@ -701,15 +1101,15 @@ class _OverlayWordByWordLine extends StatelessWidget {
                           (progress - 0.03).clamp(0.0, 1.0),
                           (progress + 0.03).clamp(0.0, 1.0),
                         ],
-                        colors: [
-                          scheme.primary,
-                          scheme.onSurface.withValues(alpha: 0.35),
-                        ],
+                        colors: [scheme.primary, inactiveColor],
                       ).createShader(bounds);
                     },
                     child: Text(
                       label,
-                      style: baseStyle?.copyWith(color: Colors.white),
+                      style: baseStyle?.copyWith(
+                        color: Colors.white,
+                        shadows: textShadows,
+                      ),
                     ),
                   ),
           );

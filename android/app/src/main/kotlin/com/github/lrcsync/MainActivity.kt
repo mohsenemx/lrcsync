@@ -257,6 +257,18 @@ class MainActivity : FlutterActivity() {
                     }
                 }
 
+                "forceStopOverlayService" -> {
+                    try {
+                        val intent = Intent().setClassName(
+                            applicationContext,
+                            "flutter.overlay.window.flutter_overlay_window.OverlayService"
+                        )
+                        stopService(intent)
+                    } catch (_: Exception) {
+                    }
+                    result.success(true)
+                }
+
                 else -> result.notImplemented()
             }
         }

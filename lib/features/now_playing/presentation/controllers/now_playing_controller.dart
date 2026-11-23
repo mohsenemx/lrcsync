@@ -194,7 +194,7 @@ class NowPlayingController extends ChangeNotifier {
       _lyricsResult = LyricsResult(
         content: clean,
         syncType: ParsedLyrics.detectSyncType(clean),
-        sourceName: 'Cached',
+        sourceName: 'Cache',
       );
       notifyListeners();
     }

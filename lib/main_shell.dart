@@ -64,6 +64,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       UpdateService.checkAndShowModalIfNeeded(
         context,
         widget.nowPlayingController.mediaService,
+        settings: widget.settingsController,
       );
     }
   }

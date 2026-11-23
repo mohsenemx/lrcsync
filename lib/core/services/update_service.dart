@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:lrcsync/main.dart';
 
 import '../../features/now_playing/data/services/native_media_service.dart';
+import '../settings/app_settings_controller.dart';
 
 class ReleaseAsset {
   final String name;
@@ -163,6 +164,7 @@ class UpdateService {
   static Future<void> checkAndShowModalIfNeeded(
     BuildContext context,
     NativeMediaService mediaService, {
+    AppSettingsController? settings,
     bool isManualCheck = false,
   }) async {
     if (isFdroidBuild) return;
@@ -182,6 +184,11 @@ class UpdateService {
       return;
     }
 
+    // Respect "Don't show again" on automatic startup checks
+    if (!isManualCheck && settings?.skippedUpdateVersion == release.version) {
+      return;
+    }
+
     final supportedAbis = await mediaService.getSupportedAbis();
     if (!context.mounted) return;
 
@@ -196,6 +203,7 @@ class UpdateService {
         release: release,
         matchedApk: matchedApk,
         mediaService: mediaService,
+        settings: settings,
       ),
     );
   }
@@ -205,11 +213,13 @@ class _UpdateBottomSheet extends StatefulWidget {
   final ReleaseInfo release;
   final ReleaseAsset? matchedApk;
   final NativeMediaService mediaService;
+  final AppSettingsController? settings;
 
   const _UpdateBottomSheet({
     required this.release,
     required this.matchedApk,
     required this.mediaService,
+    this.settings,
   });
 
   @override
@@ -227,6 +237,13 @@ class _UpdateBottomSheetState extends State<_UpdateBottomSheet> {
   String? _downloadedFilePath;
   String? _statusMessage;
   bool _isError = false;
+  late bool _dontShowAgain;
+  @override
+  void initState() {
+    super.initState();
+    _dontShowAgain =
+        widget.settings?.skippedUpdateVersion == widget.release.version;
+  }
 
   @override
   void dispose() {
@@ -576,8 +593,49 @@ class _UpdateBottomSheetState extends State<_UpdateBottomSheet> {
               ),
             ),
           ],
+          if (widget.settings != null && !_isDownloading) ...[
+            const SizedBox(height: 12),
+            InkWell(
+              borderRadius: BorderRadius.circular(12),
+              onTap: () {
+                final next = !_dontShowAgain;
+                setState(() => _dontShowAgain = next);
+                widget.settings!.setSkippedUpdateVersion(
+                  next ? widget.release.version : null,
+                );
+              },
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Row(
+                  children: [
+                    Checkbox(
+                      value: _dontShowAgain,
+                      visualDensity: VisualDensity.compact,
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      onChanged: (val) {
+                        final next = val ?? false;
+                        setState(() => _dontShowAgain = next);
+                        widget.settings!.setSkippedUpdateVersion(
+                          next ? widget.release.version : null,
+                        );
+                      },
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        "Don't show again for v${widget.release.version}",
+                        style: textTheme.bodySmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
 
-          const SizedBox(height: 20),
+          const SizedBox(height: 16),
           Row(
             children: [
               Expanded(

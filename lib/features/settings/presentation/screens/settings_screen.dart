@@ -45,6 +45,19 @@ class SettingsScreen extends StatelessWidget {
               ),
               const SizedBox(height: 12),
               _SettingsCategoryTile(
+                icon: Icons.picture_in_picture_alt_rounded,
+                iconBgColor: scheme.tertiaryContainer,
+                iconColor: scheme.onTertiaryContainer,
+                title: 'Floating Lyrics Window',
+                subtitle:
+                    '${settings.overlayShape.label} • ${settings.overlayBackgroundStyle.label} • ${(settings.overlayOpacity * 100).round()}% opacity',
+                onTap: () => _openSubpage(
+                  context,
+                  _FloatingOverlaySubpage(settings: settings),
+                ),
+              ),
+              const SizedBox(height: 12),
+              _SettingsCategoryTile(
                 icon: Icons.tune_rounded,
                 iconBgColor: scheme.secondaryContainer,
                 iconColor: scheme.onSecondaryContainer,
@@ -753,6 +766,391 @@ class _SectionHeader extends StatelessWidget {
           color: Theme.of(context).colorScheme.primary,
           fontWeight: FontWeight.bold,
         ),
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// 5. FLOATING LYRICS WINDOW SUBMENU
+// ============================================================================
+
+class _FloatingOverlaySubpage extends StatelessWidget {
+  final AppSettingsController settings;
+
+  const _FloatingOverlaySubpage({required this.settings});
+
+  Color _previewBgColor(ColorScheme scheme, bool isDark) {
+    switch (settings.overlayBackgroundStyle) {
+      case OverlayBackgroundStyle.themeSurface:
+        final base = (isDark && settings.amoledDark)
+            ? Colors.black
+            : scheme.surfaceContainerHigh;
+        return base.withValues(alpha: settings.overlayOpacity);
+      case OverlayBackgroundStyle.amoledBlack:
+        return Colors.black.withValues(alpha: settings.overlayOpacity);
+      case OverlayBackgroundStyle.frostedDark:
+        return const Color(0xFF14151A)
+            .withValues(alpha: settings.overlayOpacity);
+      case OverlayBackgroundStyle.frostedLight:
+        return const Color(0xFFF6F7FB)
+            .withValues(alpha: settings.overlayOpacity);
+      case OverlayBackgroundStyle.transparent:
+        return Colors.transparent;
+      case OverlayBackgroundStyle.customColor:
+        return settings.overlayCustomColor.withValues(
+          alpha: settings.overlayOpacity,
+        );
+    }
+  }
+
+  Color _previewFgColor(ColorScheme scheme) {
+    switch (settings.overlayBackgroundStyle) {
+      case OverlayBackgroundStyle.amoledBlack:
+      case OverlayBackgroundStyle.frostedDark:
+      case OverlayBackgroundStyle.transparent:
+        return Colors.white;
+      case OverlayBackgroundStyle.frostedLight:
+        return const Color(0xFF1A1C1E);
+      case OverlayBackgroundStyle.customColor:
+        return ThemeData.estimateBrightnessForColor(
+                  settings.overlayCustomColor,
+                ) ==
+                Brightness.dark
+            ? Colors.white
+            : const Color(0xFF1A1C1E);
+      case OverlayBackgroundStyle.themeSurface:
+        return scheme.onSurface;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Floating Lyrics'),
+        actions: [
+          TextButton(
+            onPressed: settings.resetOverlayDefaults,
+            child: const Text('Reset'),
+          ),
+        ],
+      ),
+      body: ListenableBuilder(
+        listenable: settings,
+        builder: (context, _) {
+          final isTransparent =
+              settings.overlayBackgroundStyle ==
+              OverlayBackgroundStyle.transparent;
+          final previewBg = _previewBgColor(scheme, isDark);
+          final previewFg = _previewFgColor(scheme);
+
+          return ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              // Live Preview over a wallpaper-like gradient backdrop
+              Container(
+                padding: const EdgeInsets.all(18),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(24),
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      scheme.primary.withValues(alpha: 0.45),
+                      scheme.tertiary.withValues(alpha: 0.40),
+                      scheme.secondaryContainer,
+                    ],
+                  ),
+                ),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 220),
+                  padding: const EdgeInsets.fromLTRB(14, 10, 14, 14),
+                  decoration: BoxDecoration(
+                    color: previewBg,
+                    borderRadius: BorderRadius.circular(
+                      settings.overlayShape.borderRadius,
+                    ),
+                    border: settings.overlayShowBorder && !isTransparent
+                        ? Border.all(color: previewFg.withValues(alpha: 0.18))
+                        : null,
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.drag_indicator_rounded,
+                            size: 14,
+                            color: previewFg.withValues(alpha: 0.65),
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              'Song Title • Artist',
+                              style: textTheme.labelSmall?.copyWith(
+                                color: previewFg.withValues(alpha: 0.75),
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                          Icon(
+                            Icons.open_in_full_rounded,
+                            size: 15,
+                            color: previewFg.withValues(alpha: 0.7),
+                          ),
+                          const SizedBox(width: 8),
+                          Icon(
+                            Icons.pause_rounded,
+                            size: 18,
+                            color: scheme.primary,
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      Text(
+                        'Previous lyric line...',
+                        style: textTheme.bodySmall?.copyWith(
+                          color: previewFg.withValues(alpha: 0.40),
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Active synced lyric line',
+                        textAlign: TextAlign.center,
+                        style: textTheme.titleMedium?.copyWith(
+                          color: scheme.primary,
+                          fontWeight: FontWeight.w800,
+                          shadows: isTransparent
+                              ? const [
+                                  Shadow(
+                                    color: Colors.black87,
+                                    blurRadius: 8,
+                                    offset: Offset(0, 1),
+                                  ),
+                                ]
+                              : null,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Next upcoming lyric line',
+                        style: textTheme.bodySmall?.copyWith(
+                          color: previewFg.withValues(alpha: 0.55),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+
+              // Shape & Background
+              const _SectionHeader(title: 'Shape & Background'),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Window Shape', style: textTheme.titleSmall),
+                      const SizedBox(height: 10),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: OverlayShape.values.map((shape) {
+                          return ChoiceChip(
+                            label: Text(shape.label),
+                            selected: settings.overlayShape == shape,
+                            onSelected: (_) => settings.setOverlayShape(shape),
+                          );
+                        }).toList(),
+                      ),
+                      const SizedBox(height: 18),
+                      Text('Background Style', style: textTheme.titleSmall),
+                      const SizedBox(height: 10),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: OverlayBackgroundStyle.values.map((style) {
+                          return ChoiceChip(
+                            label: Text(style.label),
+                            selected: settings.overlayBackgroundStyle == style,
+                            onSelected: (_) =>
+                                settings.setOverlayBackgroundStyle(style),
+                          );
+                        }).toList(),
+                      ),
+                      if (settings.overlayBackgroundStyle ==
+                          OverlayBackgroundStyle.customColor) ...[
+                        const SizedBox(height: 14),
+                        Text('Custom Color', style: textTheme.titleSmall),
+                        const SizedBox(height: 10),
+                        Wrap(
+                          spacing: 12,
+                          runSpacing: 10,
+                          children: AppSettingsController.availableOverlayColors
+                              .map((color) {
+                                final isSelected =
+                                    settings.overlayCustomColor == color;
+                                final checkColor =
+                                    ThemeData.estimateBrightnessForColor(
+                                          color,
+                                        ) ==
+                                        Brightness.dark
+                                    ? Colors.white
+                                    : Colors.black;
+                                return GestureDetector(
+                                  onTap: () =>
+                                      settings.setOverlayCustomColor(color),
+                                  child: Container(
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      border: Border.all(
+                                        color: scheme.outlineVariant,
+                                        width: 1.5,
+                                      ),
+                                    ),
+                                    child: CircleAvatar(
+                                      radius: 18,
+                                      backgroundColor: color,
+                                      child: isSelected
+                                          ? Icon(
+                                              Icons.check,
+                                              color: checkColor,
+                                              size: 18,
+                                            )
+                                          : null,
+                                    ),
+                                  ),
+                                );
+                              })
+                              .toList(),
+                        ),
+                      ],
+                      if (!isTransparent) ...[
+                        const SizedBox(height: 18),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              'Background Opacity',
+                              style: textTheme.titleSmall,
+                            ),
+                            Text(
+                              '${(settings.overlayOpacity * 100).round()}%',
+                              style: textTheme.labelLarge?.copyWith(
+                                color: scheme.primary,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                        Slider(
+                          value: settings.overlayOpacity,
+                          min: 0.15,
+                          max: 1.0,
+                          divisions: 17,
+                          label: '${(settings.overlayOpacity * 100).round()}%',
+                          onChanged: settings.setOverlayOpacity,
+                        ),
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('Show Window Border'),
+                          subtitle: const Text(
+                            'Add a subtle outline around the floating card',
+                          ),
+                          value: settings.overlayShowBorder,
+                          onChanged: settings.setOverlayShowBorder,
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+
+              // Dimensions
+              const _SectionHeader(title: 'Default Size'),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SwitchListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('Full Screen Width'),
+                        subtitle: const Text(
+                          'Span across the screen width (or disable to customize width)',
+                        ),
+                        value: settings.overlayFullWidth,
+                        onChanged: settings.setOverlayFullWidth,
+                      ),
+                      if (!settings.overlayFullWidth) ...[
+                        const SizedBox(height: 8),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text('Window Width', style: textTheme.titleSmall),
+                            Text(
+                              '${settings.overlayWidthDp.round()} dp',
+                              style: textTheme.labelLarge?.copyWith(
+                                color: scheme.primary,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                        Slider(
+                          value: settings.overlayWidthDp,
+                          min: 220.0,
+                          max: 420.0,
+                          divisions: 20,
+                          label: '${settings.overlayWidthDp.round()} dp',
+                          onChanged: settings.setOverlayWidthDp,
+                        ),
+                      ],
+                      const SizedBox(height: 8),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text('Window Height', style: textTheme.titleSmall),
+                          Text(
+                            '${settings.overlayHeightDp.round()} dp',
+                            style: textTheme.labelLarge?.copyWith(
+                              color: scheme.primary,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                      Slider(
+                        value: settings.overlayHeightDp,
+                        min: 120.0,
+                        max: 400.0,
+                        divisions: 28,
+                        label: '${settings.overlayHeightDp.round()} dp',
+                        onChanged: settings.setOverlayHeightDp,
+                      ),
+                      Text(
+                        'Tip: You can also resize directly on the floating window using the ⤢ icon.',
+                        style: textTheme.bodySmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }

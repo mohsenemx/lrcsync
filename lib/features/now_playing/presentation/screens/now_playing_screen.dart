@@ -32,7 +32,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         behavior: SnackBarBehavior.floating,
-        content: Center(child: Text(message)),
+        content: Text(message),
         duration: Duration(milliseconds: 300),
       ),
     );
