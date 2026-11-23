@@ -6,7 +6,7 @@
 
 [![Flutter](https://img.shields.io/badge/Flutter-3.x-02569B?logo=flutter&logoColor=white)](https://flutter.dev)
 [![Platform](https://img.shields.io/badge/Platform-Android-3DDC84?logo=android&logoColor=white)](https://www.android.com)
-[![Material You](https://img.shields.io/badge/Design-Material%20You%20(M3)-6750A4)](https://m3.material.io)
+[![Material You](<https://img.shields.io/badge/Design-Material%20You%20(M3)-6750A4>)](https://m3.material.io)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 </div>
@@ -23,10 +23,44 @@ It listens to the active Android `MediaSession` in real time, resolves local aud
 
 ## 📸 Screenshots
 
-| Now Playing | Local Library | Batch Downloader | Live Lyrics | Lyrics Card | Settings & Material You |
-| :---: | :---: | :---: | :---: | :---: | :---: |
-| ![Now Playing](assets/screenshots/now_playing.jpg) | ![Local Library](assets/screenshots/local_library.jpg) | ![Batch Downloader](assets/screenshots/batch_download.jpg) | ![Live Lyrics](assets/screenshots/lyrics.jpg) | ![Lyrics Carf](assets/screenshots/lyrics_card.jpg) | ![Settings](assets/screenshots/settings.jpg) |
-
+<div align="center">
+  <table>
+    <tr>
+      <td align="center" width="33%">
+        <strong>Now Playing</strong><br>
+        <img src="assets/screenshots/now_playing.jpg" width="250">
+      </td>
+      <td align="center" width="33%">
+        <strong>Local Library</strong><br>
+        <img src="assets/screenshots/local_library.jpg" width="250">
+      </td>
+      <td align="center" width="33%">
+        <strong>Batch Downloader</strong><br>
+        <img src="assets/screenshots/batch_download.jpg" width="250">
+      </td>
+    </tr>
+    <tr>
+      <td align="center">
+        <strong>Live Lyrics</strong><br>
+        <img src="assets/screenshots/lyrics.jpg" width="250">
+      </td>
+      <td align="center">
+        <strong>Lyrics Card</strong><br>
+        <img src="assets/screenshots/lyrics_card.jpg" width="250">
+      </td>
+      <td align="center">
+        <strong>Floating Window</strong><br>
+        <img src="assets/screenshots/floating_window.jpg" width="250">
+      </td>
+    </tr>
+    <tr>
+      <td align="center">
+        <strong>Settings & Material You</strong><br>
+        <img src="assets/screenshots/settings.jpg" width="250">
+      </td>
+    </tr>
+  </table>
+</div>
 ---
 
 ## 🚀 Features
@@ -52,6 +86,7 @@ It listens to the active Android `MediaSession` in real time, resolves local aud
   - Supports **[LRCMux](https://lrcmux.dev)** (default), **[LRCLIB](https://lrclib.net)**, and **[LRC.red](https://lrc.red)**. Drag to reorder provider priority in Settings or toggle individual sources to cascade automatically until a match is found.
 - **🎨 Material You (Material 3) & AMOLED Dark Mode**
   - Supports Android 12+ dynamic wallpaper colors, custom Material seed palettes, light/dark/system modes, and a pitch-black AMOLED mode.
+
 ---
 
 ## 🏗️ Architecture
@@ -71,7 +106,9 @@ lib/
 │   └── settings/       # Theme customizer, reorderable provider list, cache & permissions
 └── main_shell.dart     # Root navigation shell
 ```
+
 ## 🔐 Required Android Permissions
+
 Because LRCSync detects active music from other apps and writes .lrc files directly into your music folders without prompting the system file picker each time, it requests three permissions on first launch:
 
 - ### Notification Listener Access (`BIND_NOTIFICATION_LISTENER_SERVICE`)
@@ -87,6 +124,7 @@ Required to query MediaStore.Audio and match the playing song to its local file 
 Required on Android 11+ to silently write non-media .lrc files directly into shared music directories alongside your audio files.
 
 ## 🛠️ Getting Started
+
 **Prerequisites**
 
 - Flutter SDK >=3.24.0
@@ -94,12 +132,14 @@ Required on Android 11+ to silently write non-media .lrc files directly into sha
 - Android Studio / Android SDK (API 26+)
 
 **Installation & Build**
+
 1. Clone the repository
 
 ```Bash
 git clone https://github.com/mohsenemx/lrcsync.git
 cd lrcsync
 ```
+
 2. Install dependencies
 
 ```Bash
@@ -111,12 +151,14 @@ flutter pub get
 ```Bash
 flutter run
 ```
+
 4. Configure Android release signing
-To build a signed release APK, you need an Android keystore and a key.properties file.
+   To build a signed release APK, you need an Android keystore and a key.properties file.
 
 Follow the official [Flutter guide to creating a keystore and configuring Android app signing](https://docs.flutter.dev/deployment/android#sign-the-app).
 
 Create `android/key.properties` with your signing information:
+
 ```properties
 storePassword=YOUR_KEYSTORE_PASSWORD
 keyPassword=YOUR_KEY_PASSWORD
@@ -126,7 +168,7 @@ storeFile=/absolute/path/to/lrcsync-release.jks
 
 Replace the placeholder values with your own credentials and the path to your keystore. The keyAlias must match the alias you used when creating the keystore.
 
-**Important**: Keep your keystore and `android/key.properties` private. Never commit them to version control. 
+**Important**: Keep your keystore and `android/key.properties` private. Never commit them to version control.
 This repository's .gitignore excludes both.
 
 5. Build release APK
@@ -142,6 +184,7 @@ flutter build apk --release --split-per-abi
 ```
 
 ## 🤝 Acknowledgements
+
 - [LRCLIB](https://lrclib.net/) for providing a free, open-source crowdsourced synced lyrics API.
 
 - [LRC.red](https://lrc.red) for providing ISRC-matched time-synced .lrc files.
@@ -149,4 +192,5 @@ flutter build apk --release --split-per-abi
 - [LRCMux](https://lrcmux.dev/) for providing best available match across multiple sources.
 
 ## 📄 License
+
 This project is licensed under the MIT License — see the `LICENSE` file for details.
